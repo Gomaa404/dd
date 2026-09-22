@@ -12,12 +12,23 @@ import SessionsPage from './pages/SessionsPage'
 import InvoicesPage from './pages/InvoicesPage'
 import ProfilePage from './pages/ProfilePage'
 import NotificationsPage from './pages/NotificationsPage'
+import CreateCompanyPage from './pages/CreateCompanyPage'
+import CompaniesPage from './pages/CompaniesPage'
 import AuthPage from './pages/AuthPage'
+import { SuperAdminLayout } from './layout/SuperAdminLayout'
 
 export function AppRoutes() {
   return (
     <Routes>
+      {/* Platform-level routes (outside tenant / Dosari dashboard) */}
       <Route path="login" element={<AuthPage />} />
+      <Route path="register-company" element={<CreateCompanyPage />} />
+      <Route path="super-admin" element={<SuperAdminLayout />}>
+        <Route index element={<CompaniesPage />} />
+      </Route>
+      <Route path="companies" element={<Navigate to="/super-admin" replace />} />
+
+      {/* Tenant firm dashboard (مكتب الدوسري) */}
       <Route element={<ProtectedRoute />}>
         <Route element={<DashboardLayout />}>
           <Route index element={<DashboardPage />} />

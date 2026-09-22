@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Icon } from '../ui/Icon'
 import { useAuth } from '../../context/AuthContext'
@@ -107,6 +107,16 @@ export default function AuthPage() {
                   </label>
                   <p className="auth-hint">
                     تجريبي: client@test.com / 123456 — أو admin@test.com / lawyer@test.com
+                  </p>
+                  <p className="auth-hint">
+                    مكتب جديد على المنصة؟{' '}
+                    <Link to="/register-company" style={{ color: 'var(--brand-teal)', fontWeight: 700 }}>
+                      سجّل شركتك
+                    </Link>
+                    {' · '}
+                    <Link to="/super-admin" style={{ color: 'var(--brand-teal)', fontWeight: 700 }}>
+                      إدارة المنصة
+                    </Link>
                   </p>
                   <button type="submit" className="auth-submit">
                     دخول <Icon name="login" size={18} />

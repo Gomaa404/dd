@@ -35,6 +35,7 @@ import {
   HiOutlineCash,
   HiOutlineReceiptTax,
   HiOutlineLogin,
+  HiOutlineOfficeBuilding,
 } from 'react-icons/hi'
 import { MdOutlineGavel } from 'react-icons/md'
 
@@ -46,6 +47,7 @@ const map = {
   documents: HiOutlineDocumentText,
   lawyers: HiOutlineUserGroup,
   clients: HiOutlineUsers,
+  companies: HiOutlineOfficeBuilding,
   invoices: HiOutlineCurrencyDollar,
   bell: HiOutlineBell,
   menu: HiOutlineMenuAlt3,
