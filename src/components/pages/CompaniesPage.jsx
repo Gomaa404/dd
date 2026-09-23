@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   HiOutlineExclamationCircle,
   HiOutlineOfficeBuilding,
   HiOutlineRefresh,
 } from 'react-icons/hi'
 import { Icon } from '../ui/Icon'
+import { FilterSelect } from '../ui/FilterSelect'
 import { CompanyFormModal } from '../companies/CompanyFormModal'
 import { CompanyDetailsModal } from '../companies/CompanyDetailsModal'
 import { CompanyDeleteModal } from '../companies/CompanyDeleteModal'
@@ -12,25 +13,21 @@ import { SaaSMetricsCards } from '../companies/SaaSMetricsCards'
 import { CompanyLogo, PlanBadge, StatusBadge } from '../companies/CompanyBadges'
 import {
   computeTenantMetrics,
-  fetchCompanies,
   formatDisplayDate,
   isExpiringSoon,
-  parseApiError,
   planLabel,
   statusLabel,
 } from '../../api/companies'
+import { useCompanies } from '../../hooks/useCompanies'
 
 /**
  * Super-Admin SaaS dashboard for multi-tenant law-firm (Company) management.
  */
 export default function CompaniesPage() {
-  const [companies, setCompanies] = useState([])
+  const { companies, isLoading, isFetching, error, refetch } = useCompanies()
   const [query, setQuery] = useState('')
   const [planFilter, setPlanFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState(null)
   const [toast, setToast] = useState(null)
 
   const [formOpen, setFormOpen] = useState(false)
@@ -39,26 +36,6 @@ export default function CompaniesPage() {
   const [detailsCompany, setDetailsCompany] = useState(null)
   const [deletingCompany, setDeletingCompany] = useState(null)
 
-  const loadCompanies = useCallback(async ({ silent = false } = {}) => {
-    if (silent) setRefreshing(true)
-    else setLoading(true)
-    setError(null)
-
-    try {
-      const list = await fetchCompanies()
-      setCompanies(list)
-    } catch (err) {
-      setError(parseApiError(err).message)
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    loadCompanies()
-  }, [loadCompanies])
-
   useEffect(() => {
     if (!toast) return undefined
     const id = window.setTimeout(() => setToast(null), 3200)
@@ -66,6 +43,15 @@ export default function CompaniesPage() {
   }, [toast])
 
   const metrics = useMemo(() => computeTenantMetrics(companies), [companies])
+
+  const hasActiveFilters =
+    Boolean(query.trim()) || planFilter !== 'all' || statusFilter !== 'all'
+
+  const clearFilters = () => {
+    setQuery('')
+    setPlanFilter('all')
+    setStatusFilter('all')
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -103,28 +89,19 @@ export default function CompaniesPage() {
 
   const showToast = (text, tone = 'success') => setToast({ text, tone })
 
-  const handleFormSuccess = (saved, mode) => {
+  const handleFormSuccess = async (saved, mode) => {
     const name = saved?.name || editingCompany?.name || 'المكتب'
     showToast(
       mode === 'edit' ? `تم تحديث «${name}» بنجاح` : `تم إنشاء «${name}» بنجاح`,
     )
-
-    if (saved?.id) {
-      setCompanies((prev) => {
-        const exists = prev.some((c) => c.id === saved.id)
-        if (exists) return prev.map((c) => (c.id === saved.id ? { ...c, ...saved } : c))
-        return [saved, ...prev]
-      })
-    } else {
-      loadCompanies({ silent: true })
-    }
+    await refetch()
   }
 
-  const handleDeleted = (company) => {
-    setCompanies((prev) => prev.filter((c) => c.id !== company.id))
+  const handleDeleted = async (company) => {
     if (detailsCompany?.id === company.id) setDetailsCompany(null)
     if (editingCompany?.id === company.id) setEditingCompany(null)
     showToast(`تم حذف «${company.name}» بنجاح`)
+    await refetch()
   }
 
   return (
@@ -141,13 +118,13 @@ export default function CompaniesPage() {
           <button
             type="button"
             className="btn btn--ghost inline-flex items-center gap-2"
-            onClick={() => loadCompanies({ silent: true })}
-            disabled={loading || refreshing}
+            onClick={() => refetch()}
+            disabled={isLoading || isFetching}
             title="تحديث"
           >
             <HiOutlineRefresh
               size={18}
-              className={refreshing ? 'animate-spin' : undefined}
+              className={isFetching ? 'animate-spin' : undefined}
               aria-hidden
             />
             تحديث
@@ -159,7 +136,7 @@ export default function CompaniesPage() {
         </div>
       </div>
 
-      <SaaSMetricsCards metrics={metrics} loading={loading} />
+      <SaaSMetricsCards metrics={metrics} loading={isLoading} />
 
       {/* Toast */}
       {toast ? (
@@ -190,34 +167,39 @@ export default function CompaniesPage() {
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            className="h-10 rounded-xl border border-[#d5e0e0] bg-white px-3 text-sm text-brand outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
+          <FilterSelect
             value={planFilter}
-            onChange={(e) => setPlanFilter(e.target.value)}
+            onChange={setPlanFilter}
             aria-label="تصفية حسب الخطة"
-          >
-            <option value="all">كل الخطط</option>
-            <option value="trial">تجريبي</option>
-            <option value="basic">أساسي</option>
-            <option value="professional">احترافي</option>
-            <option value="enterprise">مؤسسي</option>
-          </select>
-          <select
-            className="h-10 rounded-xl border border-[#d5e0e0] bg-white px-3 text-sm text-brand outline-none focus:border-gold focus:ring-2 focus:ring-gold/20"
+            options={[
+              { value: 'all', label: 'كل الخطط' },
+              { value: 'trial', label: 'تجريبي' },
+              { value: 'basic', label: 'أساسي' },
+              { value: 'professional', label: 'احترافي' },
+              { value: 'enterprise', label: 'مؤسسي' },
+            ]}
+          />
+          <FilterSelect
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={setStatusFilter}
             aria-label="تصفية حسب الحالة"
-          >
-            <option value="all">كل الحالات</option>
-            <option value="active">نشط</option>
-            <option value="inactive">غير نشط</option>
-            <option value="expired">منتهي</option>
-          </select>
+            options={[
+              { value: 'all', label: 'كل الحالات' },
+              { value: 'active', label: 'نشط' },
+              { value: 'inactive', label: 'غير نشط' },
+              { value: 'expired', label: 'منتهي' },
+            ]}
+          />
+          {hasActiveFilters ? (
+            <button type="button" className="btn btn--ghost" onClick={clearFilters}>
+              مسح الفلاتر
+            </button>
+          ) : null}
         </div>
       </div>
 
       {/* Loading */}
-      {loading ? (
+      {isLoading ? (
         <div className="table-card flex flex-col items-center justify-center gap-3 py-16 text-[#6b7f80]">
           <HiOutlineRefresh size={28} className="animate-spin text-gold" aria-hidden />
           <p className="text-sm font-medium">جاري تحميل بيانات المستأجرين...</p>
@@ -225,7 +207,7 @@ export default function CompaniesPage() {
       ) : null}
 
       {/* Error */}
-      {!loading && error ? (
+      {!isLoading && error ? (
         <div className="table-card flex flex-col items-center gap-4 px-6 py-12 text-center">
           <span className="grid size-14 place-items-center rounded-2xl bg-rose-50 text-rose-600">
             <HiOutlineExclamationCircle size={28} aria-hidden />
@@ -237,7 +219,7 @@ export default function CompaniesPage() {
           <button
             type="button"
             className="btn btn--primary inline-flex items-center gap-2"
-            onClick={() => loadCompanies()}
+            onClick={() => refetch()}
           >
             <HiOutlineRefresh size={18} aria-hidden />
             إعادة المحاولة
@@ -246,7 +228,7 @@ export default function CompaniesPage() {
       ) : null}
 
       {/* Tenants table */}
-      {!loading && !error ? (
+      {!isLoading && !error ? (
         <div className="table-card">
           <div className="table-wrap">
             <table className="data-table data-table--companies">

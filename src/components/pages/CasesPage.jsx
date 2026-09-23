@@ -1,74 +1,151 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { HiOutlineRefresh, HiOutlineExclamationCircle } from 'react-icons/hi'
 import { Icon } from '../ui/Icon'
 import { AddCaseModal } from '../cases/AddCaseModal'
 import { CaseDetailsModal } from '../cases/CaseDetailsModal'
-import { initialCases, normalizeCaseFromForm } from '../../data/cases'
-import { isSamePerson } from '../../data/roles'
-import { useAuth } from '../../context/AuthContext'
-import { getClientCases } from '../../data/clientDashboard'
+import { caseStatusLabel, parseApiError } from '../../api/cases'
+import { getStoredCompanyId } from '../../api/client'
+import {
+  useCaseCategories,
+  useCaseMutations,
+  useCases,
+  useCaseTypes,
+} from '../../hooks/useCases'
+import { useClients } from '../../hooks/useClients'
+import { useLawyers } from '../../hooks/useLawyers'
 
 function statusClass(status) {
-  if (status === 'منتهي') return 'status-pill status-pill--done'
-  if (status === 'مؤجل') return 'status-pill status-pill--hold'
+  if (status === 'closed' || status === 'منتهي') return 'status-pill status-pill--done'
+  if (status === 'postponed' || status === 'مؤجل') return 'status-pill status-pill--hold'
   return 'status-pill status-pill--active'
 }
 
-function displayStatus(status) {
-  if (status === 'قيد' || status === 'نشطة') return 'نشط'
-  return status
+function formatDate(dateStr) {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function resolveLawyerName(item, lawyerNameById) {
+  const nested =
+    item.lawyer?.user?.full_name ||
+    item.lawyer?.full_name ||
+    item.lawyer?.name ||
+    item.lawyerName
+  if (nested && nested !== '—') return nested
+  if (item.lawyer_id != null) {
+    const fromList = lawyerNameById.get(Number(item.lawyer_id))
+    if (fromList && fromList !== '—') return fromList
+  }
+  return '—'
 }
 
 export default function CasesPage() {
-  const { user } = useAuth()
-  const isLawyer = user?.roleId === 'lawyer'
-  const isClient = user?.roleId === 'client'
-  const isAdmin = !isLawyer && !isClient
-  const [cases, setCases] = useState(initialCases)
+  const { cases, isLoading, isFetching, error, refetch } = useCases()
+  const { caseTypes } = useCaseTypes()
+  const { caseCategories } = useCaseCategories()
+  const { clients } = useClients()
+  const { lawyers } = useLawyers()
+  const { create, remove } = useCaseMutations()
+
+  const [toast, setToast] = useState(null)
   const [query, setQuery] = useState('')
   const [addOpen, setAddOpen] = useState(false)
-  const [selectedId, setSelectedId] = useState(null)
+  const [selectedCase, setSelectedCase] = useState(null)
 
-  const visibleCases = useMemo(() => {
-    if (isLawyer) {
-      return cases.filter((item) => isSamePerson(item.lawyer, user?.name))
+  const showToast = (text, tone = 'success') => setToast({ text, tone })
+
+  useEffect(() => {
+    if (!toast) return undefined
+    const id = window.setTimeout(() => setToast(null), 3200)
+    return () => window.clearTimeout(id)
+  }, [toast])
+
+  const lawyerNameById = useMemo(() => {
+    const map = new Map()
+    for (const lawyer of lawyers) {
+      if (lawyer?.id == null) continue
+      map.set(Number(lawyer.id), lawyer.name)
     }
-    if (isClient) {
-      return getClientCases(user?.name, cases)
-    }
-    return cases
-  }, [cases, isLawyer, isClient, user?.name])
+    return map
+  }, [lawyers])
+
+  const hasActiveFilters = Boolean(query.trim())
+
+  const clearFilters = () => setQuery('')
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return visibleCases
-    return visibleCases.filter((item) =>
-      [item.number, item.title, item.client, item.lawyer, item.type, item.status]
+    if (!q) return cases
+    return cases.filter((item) =>
+      [
+        item.case_number,
+        item.title,
+        item.client?.full_name,
+        resolveLawyerName(item, lawyerNameById),
+        item.type?.name,
+        item.status,
+      ]
         .join(' ')
         .toLowerCase()
         .includes(q),
     )
-  }, [visibleCases, query])
+  }, [cases, query, lawyerNameById])
 
-  const selectedCase = cases.find((item) => item.id === selectedId) || null
-
-  const handleSave = (payload) => {
-    setCases((prev) => [normalizeCaseFromForm(payload), ...prev])
+  const handleSave = async (payload) => {
+    const companyId = getStoredCompanyId()
+    try {
+      await create.mutateAsync({
+        ...payload,
+        ...(companyId != null ? { company_id: companyId } : {}),
+      })
+      showToast('تم إضافة القضية بنجاح')
+      setAddOpen(false)
+      await refetch()
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error')
+      throw err
+    }
   }
 
-  const handleUpdateCase = (updated) => {
-    setCases((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+  const handleUpdateCase = async () => {
+    await refetch()
   }
 
-  const handleDelete = (id) => {
-    setCases((prev) => prev.filter((item) => item.id !== id))
-    if (selectedId === id) setSelectedId(null)
+  const handleDelete = async (id) => {
+    try {
+      await remove.mutateAsync(id)
+      if (selectedCase?.id === id) setSelectedCase(null)
+      showToast('تم حذف القضية بنجاح')
+      await refetch()
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error')
+    }
   }
+
+  const loading = isLoading
+  const refreshing = isFetching && !isLoading
 
   return (
     <div className="cases-page">
       <div className="cases-toolbar">
         <h2 className="cases-toolbar__title">القضايا</h2>
         <div className="cases-toolbar__actions">
+          <button
+            type="button"
+            className="btn btn--ghost inline-flex items-center gap-2"
+            onClick={() => refetch()}
+            disabled={loading || refreshing}
+            title="تحديث"
+          >
+            <HiOutlineRefresh
+              size={18}
+              className={refreshing ? 'animate-spin' : undefined}
+              aria-hidden
+            />
+            تحديث
+          </button>
           <div className="search-field">
             <Icon name="search" className="search-field__icon" />
             <input
@@ -80,78 +157,126 @@ export default function CasesPage() {
               aria-label="بحث في القضايا"
             />
           </div>
-          {isAdmin && (
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={() => setAddOpen(true)}
-            >
-              <Icon name="plus" size={18} />
-              إضافة قضية
+          {hasActiveFilters ? (
+            <button type="button" className="btn btn--ghost" onClick={clearFilters}>
+              مسح الفلاتر
             </button>
-          )}
+          ) : null}
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => setAddOpen(true)}
+          >
+            <Icon name="plus" size={18} />
+            إضافة قضية
+          </button>
         </div>
       </div>
 
-      <div className="table-card">
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>رقم القضية</th>
-                <th>العنوان</th>
-                <th>الموكل</th>
-                <th>المحامي</th>
-                <th>النوع</th>
-                <th>الحالة</th>
-                <th>الجلسة القادمة</th>
-                <th>الإجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
+      {/* Toast */}
+      {toast ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className={
+            toast.tone === 'success'
+              ? 'mb-4 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800'
+              : 'mb-4 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800'
+          }
+        >
+          <p className="font-medium">{toast.text}</p>
+        </div>
+      ) : null}
+
+      {/* Loading */}
+      {loading ? (
+        <div className="table-card flex flex-col items-center justify-center gap-3 py-16 text-[#6b7f80]">
+          <HiOutlineRefresh size={28} className="animate-spin text-gold" aria-hidden />
+          <p className="text-sm font-medium">جاري تحميل القضايا...</p>
+        </div>
+      ) : null}
+
+      {/* Error */}
+      {!loading && error ? (
+        <div className="table-card flex flex-col items-center gap-4 px-6 py-12 text-center">
+          <span className="grid size-14 place-items-center rounded-2xl bg-rose-50 text-rose-600">
+            <HiOutlineExclamationCircle size={28} aria-hidden />
+          </span>
+          <div>
+            <p className="font-display text-base font-bold text-brand">تعذر تحميل البيانات</p>
+            <p className="mt-1 text-sm text-[#6b7f80]">{error}</p>
+          </div>
+          <button
+            type="button"
+            className="btn btn--primary inline-flex items-center gap-2"
+            onClick={() => refetch()}
+          >
+            <HiOutlineRefresh size={18} aria-hidden />
+            إعادة المحاولة
+          </button>
+        </div>
+      ) : null}
+
+      {/* Table */}
+      {!loading && !error ? (
+        <div className="table-card">
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <td colSpan={8} className="data-table__empty">
-                    لا توجد قضايا مطابقة لبحثك
-                  </td>
+                  <th>رقم القضية</th>
+                  <th>العنوان</th>
+                  <th>الموكل</th>
+                  <th>المحامي</th>
+                  <th>النوع</th>
+                  <th>الحالة</th>
+                  <th>الجلسة القادمة</th>
+                  <th>الإجراءات</th>
                 </tr>
-              ) : (
-                filtered.map((item) => (
-                  <tr key={item.id}>
-                    <td className="data-table__mono">{item.number}</td>
-                    <td>{item.title}</td>
-                    <td>{item.client}</td>
-                    <td>{item.lawyer}</td>
-                    <td>{item.type}</td>
-                    <td>
-                      <span className={statusClass(item.status)}>
-                        {displayStatus(item.status)}
-                      </span>
+              </thead>
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="data-table__empty">
+                      {query.trim()
+                        ? 'لا توجد قضايا مطابقة لبحثك'
+                        : 'لا توجد قضايا مسجلة بعد'}
                     </td>
-                    <td>{item.nextSession}</td>
-                    <td>
-                      <div className="row-actions">
-                        <button
-                          type="button"
-                          className="action-btn action-btn--view"
-                          title="عرض"
-                          aria-label={`عرض ${item.title}`}
-                          onClick={() => setSelectedId(item.id)}
-                        >
-                          <Icon name="eye" size={16} />
-                        </button>
-                        {!isClient && (
+                  </tr>
+                ) : (
+                  filtered.map((item) => (
+                    <tr key={item.id}>
+                      <td className="data-table__mono">{item.case_number}</td>
+                      <td>{item.title}</td>
+                      <td>{item.client?.full_name ?? '—'}</td>
+                      <td>{resolveLawyerName(item, lawyerNameById)}</td>
+                      <td>{item.type?.name ?? '—'}</td>
+                      <td>
+                        <span className={statusClass(item.status)}>
+                          {caseStatusLabel(item.status)}
+                        </span>
+                      </td>
+                      <td>{formatDate(item.next_session_date)}</td>
+                      <td>
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="action-btn action-btn--view"
+                            title="عرض"
+                            aria-label={`عرض ${item.title}`}
+                            onClick={() => setSelectedCase(item)}
+                          >
+                            <Icon name="eye" size={16} />
+                          </button>
                           <button
                             type="button"
                             className="action-btn action-btn--edit"
                             title="تعديل"
                             aria-label={`تعديل ${item.title}`}
-                            onClick={() => setSelectedId(item.id)}
+                            onClick={() => setSelectedCase(item)}
                           >
                             <Icon name="edit" size={16} />
                           </button>
-                        )}
-                        {isAdmin && (
                           <button
                             type="button"
                             className="action-btn action-btn--delete"
@@ -161,29 +286,51 @@ export default function CasesPage() {
                           >
                             <Icon name="trash" size={16} />
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          {filtered.length > 0 ? (
+            <div className="flex items-center justify-between border-t border-[#d5e0e0] px-4 py-3 text-xs text-[#6b7f80]">
+              <span>
+                عرض {filtered.length} من أصل {cases.length} قضية
+              </span>
+            </div>
+          ) : null}
         </div>
-      </div>
+      ) : null}
 
       <AddCaseModal
         open={addOpen}
         onClose={() => setAddOpen(false)}
         onSave={handleSave}
+        caseTypes={caseTypes}
+        caseCategories={caseCategories}
+        clients={clients}
+        lawyers={lawyers}
       />
 
       <CaseDetailsModal
         open={Boolean(selectedCase)}
-        caseData={selectedCase}
-        onClose={() => setSelectedId(null)}
+        caseData={
+          selectedCase
+            ? {
+                ...selectedCase,
+                lawyerName: resolveLawyerName(selectedCase, lawyerNameById),
+                lawyerDetails: {
+                  ...selectedCase.lawyerDetails,
+                  name: resolveLawyerName(selectedCase, lawyerNameById),
+                },
+              }
+            : null
+        }
+        onClose={() => setSelectedCase(null)}
         onUpdate={handleUpdateCase}
-        readOnly={isClient}
+        readOnly={false}
       />
     </div>
   )

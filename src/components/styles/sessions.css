@@ -117,11 +117,6 @@
   background: linear-gradient(135deg, #ffeded, #fbd8d8);
 }
 
-.action-btn--postpone {
-  background: linear-gradient(145deg, #b8975a, #8b775e);
-  box-shadow: 0 4px 12px rgba(139, 119, 94, 0.35);
-}
-
 .session-details {
   display: flex;
   flex-direction: column;
@@ -311,6 +306,17 @@
   font-size: 0.7rem;
   color: var(--text-muted);
   font-weight: 700;
+}
+
+.sessions-filters__grid > label,
+.appointments-filters__grid > label {
+  min-width: 0;
+  overflow: visible;
+}
+
+.sessions-filters,
+.appointments-filters {
+  overflow: visible;
 }
 
 @media (max-width: 1200px) {

@@ -3,15 +3,18 @@ import {
   authenticate,
   clearAuthSession,
   readAuthSession,
-  registerUser,
   writeAuthSession,
 } from '../data/auth'
+import { parseApiError, registerUserViaApi } from '../api/users'
+import { queryClient } from '../lib/queryClient'
+import { userKeys } from '../hooks/queryKeys'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => readAuthSession())
   const [toast, setToast] = useState(null)
+  const [registering, setRegistering] = useState(false)
 
   const showToast = useCallback((message, tone = 'success') => {
     setToast({ message, tone })
@@ -25,26 +28,55 @@ export function AuthProvider({ children }) {
         showToast('بيانات الدخول غير صحيحة', 'error')
         return false
       }
-      writeAuthSession(session)
-      setUser(session)
+      // Assign default company_id=2 on login so the axios interceptor
+      // automatically injects ?company_id=2 in every API request.
+      const sessionWithCompany = {
+        ...session,
+        company_id: session.company_id ?? 2,
+        company_name: session.company_name ?? 'Law Office',
+      }
+      writeAuthSession(sessionWithCompany)
+      setUser(sessionWithCompany)
       showToast('تم تسجيل الدخول بنجاح', 'success')
       return true
     },
     [showToast],
   )
 
+  /**
+   * Create account via POST /api/users — backend is the source of truth.
+   * Returns true on success, false on validation/API failure.
+   */
   const register = useCallback(
-    (form) => {
-      const result = registerUser(form)
-      if (!result.ok) {
-        showToast(result.message, 'error')
+    async (form) => {
+      if (registering) return false
+      setRegistering(true)
+      try {
+        const session = await registerUserViaApi(form, {
+          companyId: form.company_id ?? 2,
+        })
+        const sessionWithCompany = {
+          ...session,
+          company_id: session.company_id ?? 2,
+          company_name: session.company_name ?? 'Law Office',
+        }
+        writeAuthSession(sessionWithCompany)
+        setUser(sessionWithCompany)
+        await queryClient.invalidateQueries({ queryKey: userKeys.all })
+        showToast('تم إنشاء الحساب بنجاح', 'success')
+        return true
+      } catch (err) {
+        if (err?.isValidation) {
+          showToast(err.message, 'error')
+        } else {
+          showToast(parseApiError(err).message, 'error')
+        }
         return false
+      } finally {
+        setRegistering(false)
       }
-      setUser(result.session)
-      showToast('تم إنشاء الحساب بنجاح', 'success')
-      return true
     },
-    [showToast],
+    [registering, showToast],
   )
 
   const logout = useCallback(() => {
@@ -53,16 +85,37 @@ export function AuthProvider({ children }) {
     showToast('تم تسجيل الخروج', 'success')
   }, [showToast])
 
+  /**
+   * Switch the active company context at runtime.
+   * Persists company_id into localStorage session so the axios interceptor
+   * can inject ?company_id=X into every subsequent API request automatically.
+   */
+  const setCompany = useCallback((company) => {
+    setUser((prev) => {
+      const updated = {
+        ...(prev ?? {}),
+        company_id: company.id,
+        company_name: company.name,
+        company_logo: company.logo ?? null,
+      }
+      writeAuthSession(updated)
+      return updated
+    })
+  }, [])
+
   const value = useMemo(
     () => ({
       user,
       isAuthenticated: Boolean(user),
+      company_id: user?.company_id ?? null,
       login,
       register,
+      registering,
       logout,
+      setCompany,
       toast,
     }),
-    [user, login, register, logout, toast],
+    [user, login, register, registering, logout, setCompany, toast],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

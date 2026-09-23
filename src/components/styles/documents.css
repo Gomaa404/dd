@@ -3,35 +3,18 @@
 .documents-page {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 1.15rem;
 }
 
 .documents-toolbar__actions {
   flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
 }
 
-.filter-select {
-  min-width: 140px;
-  height: 42px;
-  padding: 0 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: linear-gradient(180deg, #fff, #f8f6f1);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition:
-    border-color var(--transition),
-    box-shadow var(--transition),
-    transform var(--transition);
-}
-
-.filter-select:hover,
-.filter-select:focus {
-  outline: none;
-  border-color: rgba(196, 163, 90, 0.55);
-  box-shadow: 0 0 0 3px rgba(196, 163, 90, 0.15);
+.documents-toolbar__actions .filter-select-wrap {
+  width: auto;
+  flex: 0 1 auto;
 }
 
 .doc-file-cell {
@@ -64,21 +47,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.action-btn--download {
-  background: linear-gradient(145deg, #4caf7a, #2d8a5e);
-  box-shadow: 0 4px 12px rgba(45, 138, 94, 0.3);
-}
-
-.action-btn--view-gold {
-  background: linear-gradient(145deg, #b8975a, #8b775e);
-  box-shadow: 0 4px 12px rgba(139, 119, 94, 0.35);
-}
-
-.action-btn--notes {
-  background: linear-gradient(145deg, #4d8fd4, #3a6ea5);
-  box-shadow: 0 4px 12px rgba(58, 110, 165, 0.3);
 }
 
 .btn--danger {
@@ -173,7 +141,8 @@
     gap: 0.2rem;
   }
 
-  .documents-toolbar__actions .filter-select {
+  .documents-toolbar__actions .filter-select-wrap {
     flex: 1 1 140px;
+    width: auto;
   }
 }

@@ -2,13 +2,15 @@ import { useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { FormSection, Field, FieldGrid } from '../ui/Form'
 import { Icon } from '../ui/Icon'
-import { documentTypeOptions } from '../../data/cases'
+import { FilterSelect } from '../ui/FilterSelect'
+import { documentTypeOptions } from '../../api/documents'
 
 const emptyDoc = {
   name: '',
   type: '',
   notes: '',
   fileName: '',
+  file: null,
 }
 
 export function UploadDocumentModal({ open, onClose, onSave, caseLabel }) {
@@ -25,20 +27,23 @@ export function UploadDocumentModal({ open, onClose, onSave, caseLabel }) {
     onClose()
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     if (!form.name.trim() || !form.fileName) return
-    onSave({
-      id: String(Date.now()),
-      name: form.name,
-      type: form.type || 'أخرى',
-      notes: form.notes,
-      fileName: form.fileName,
-      uploadedAt: new Date().toLocaleDateString('ar-SA'),
-    })
-    setForm(emptyDoc)
-    setFileLabel('لم يتم اختيار ملف')
-    onClose()
+    try {
+      await onSave({
+        name: form.name,
+        type: form.type || 'أخرى',
+        notes: form.notes,
+        fileName: form.fileName,
+        file: form.file,
+      })
+      setForm(emptyDoc)
+      setFileLabel('لم يتم اختيار ملف')
+      onClose()
+    } catch {
+      /* parent/modal shows error */
+    }
   }
 
   return (
@@ -76,6 +81,7 @@ export function UploadDocumentModal({ open, onClose, onSave, caseLabel }) {
                       setForm((prev) => ({
                         ...prev,
                         fileName: file?.name || '',
+                        file: file || null,
                       }))
                     }}
                   />
@@ -111,14 +117,15 @@ export function UploadDocumentModal({ open, onClose, onSave, caseLabel }) {
               />
             </Field>
             <Field label="نوع المستند">
-              <select className="input" value={form.type} onChange={set('type')}>
-                <option value="">-- اختر النوع --</option>
-                {documentTypeOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+              <FilterSelect
+                value={form.type}
+                onChange={(value) => set('type')({ target: { value } })}
+                aria-label="نوع المستند"
+                options={[
+                  { value: '', label: '-- اختر النوع --' },
+                  ...documentTypeOptions.map((opt) => ({ value: opt, label: opt })),
+                ]}
+              />
             </Field>
           </FieldGrid>
         </FormSection>

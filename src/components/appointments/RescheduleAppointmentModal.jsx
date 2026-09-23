@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { Field, FieldGrid } from '../ui/Form'
 import { Icon } from '../ui/Icon'
-import { formatAppointmentDate } from '../../data/appointments'
+import { DateField } from '../ui/DateField'
+import { TimeField } from '../ui/TimeField'
+import { formatDisplayDate } from '../../utils/formatDisplay'
 
 const emptyForm = {
   date: '',
@@ -65,7 +67,7 @@ export function RescheduleAppointmentModal({
           <div className="appointment-details__grid">
             <div>
               <span>التاريخ:</span>
-              <strong>{formatAppointmentDate(appointment.date)}</strong>
+              <strong>{formatDisplayDate(appointment.date)}</strong>
             </div>
             <div>
               <span>الوقت:</span>
@@ -84,20 +86,18 @@ export function RescheduleAppointmentModal({
 
         <FieldGrid cols={2}>
           <Field label="التاريخ الجديد المقترح" required>
-            <input
-              type="date"
-              className="input"
+            <DateField
               value={form.date}
-              onChange={set('date')}
+              onChange={(value) => set('date')({ target: { value } })}
+              aria-label="التاريخ الجديد المقترح"
               required
             />
           </Field>
           <Field label="الوقت الجديد المقترح" required>
-            <input
-              type="time"
-              className="input"
+            <TimeField
               value={form.time}
-              onChange={set('time')}
+              onChange={(value) => set('time')({ target: { value } })}
+              aria-label="الوقت الجديد المقترح"
               required
             />
           </Field>

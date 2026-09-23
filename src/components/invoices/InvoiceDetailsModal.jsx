@@ -1,6 +1,6 @@
 import { Modal } from '../ui/Modal'
 import { Icon } from '../ui/Icon'
-import { formatMoney, formatInvoiceDate, remaining } from '../../data/invoices'
+import { formatMoney, formatInvoiceDate, remaining } from '../../api/invoices'
 
 function statusPill(status) {
   if (status === 'مدفوعة') return 'invoice-pill invoice-pill--paid'

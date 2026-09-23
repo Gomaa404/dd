@@ -1,9 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Modal } from '../ui/Modal'
+import { FilterSelect } from '../ui/FilterSelect'
 import { Icon } from '../ui/Icon'
-import { appointmentLawyers, formatAppointmentDate } from '../../data/appointments'
+import { formatDisplayDate } from '../../utils/formatDisplay'
 
-export function AssignLawyerModal({ open, appointment, onClose, onAssign }) {
+export function AssignLawyerModal({
+  open,
+  appointment,
+  onClose,
+  onAssign,
+  lawyerOptions = [],
+}) {
   const [lawyerId, setLawyerId] = useState('')
 
   useEffect(() => {
@@ -43,7 +50,7 @@ export function AssignLawyerModal({ open, appointment, onClose, onAssign }) {
             تفاصيل الموعد
           </h3>
           <p><b>الموكل:</b> {appointment.clientName}</p>
-          <p><b>التاريخ:</b> {formatAppointmentDate(appointment.date)}</p>
+          <p><b>التاريخ:</b> {formatDisplayDate(appointment.date)}</p>
           <p><b>الوقت:</b> {appointment.time}</p>
           <p><b>النوع:</b> {appointment.type}</p>
         </section>
@@ -52,19 +59,18 @@ export function AssignLawyerModal({ open, appointment, onClose, onAssign }) {
           <span className="field__label">
             اختر المحامي <span className="field__req">*</span>
           </span>
-          <select
-            className="input"
+          <FilterSelect
             value={lawyerId}
-            onChange={(event) => setLawyerId(event.target.value)}
-            required
-          >
-            <option value="">-- اختر محامي --</option>
-            {appointmentLawyers.map((lawyer) => (
-              <option key={lawyer.id} value={lawyer.id}>
-                {lawyer.name}
-              </option>
-            ))}
-          </select>
+            onChange={setLawyerId}
+            aria-label="اختر المحامي"
+            options={[
+              { value: '', label: '-- اختر محامي --' },
+              ...lawyerOptions.map((lawyer) => ({
+                value: lawyer.id,
+                label: lawyer.name,
+              })),
+            ]}
+          />
         </label>
 
         <div className="info-banner appointment-info-banner">

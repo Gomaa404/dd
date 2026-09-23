@@ -11,10 +11,14 @@ export function DocumentNotesModal({ open, document: doc, onClose, onSave }) {
 
   if (!doc) return null
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault()
-    onSave?.(doc.id, notes.trim())
-    onClose()
+    try {
+      await onSave?.(doc.id, notes.trim())
+      onClose()
+    } catch {
+      /* parent surfaces error */
+    }
   }
 
   const header = (

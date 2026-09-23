@@ -1,65 +1,99 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { HiOutlineExclamationCircle, HiOutlineRefresh } from 'react-icons/hi'
 import { Icon } from '../ui/Icon'
+import { FilterSelect } from '../ui/FilterSelect'
 import { StatCard } from '../dashboard/StatCard'
 import { UploadDocumentModal } from '../documents/UploadDocumentModal'
 import { DocumentDetailsModal } from '../documents/DocumentDetailsModal'
 import { DocumentNotesModal } from '../documents/DocumentNotesModal'
 import { useAuth } from '../../context/AuthContext'
-import { getLawyerDocuments, getLawyerCaseIds } from '../../data/lawyerDashboard'
-import { getClientDocuments, getClientCaseIds } from '../../data/clientDashboard'
+import { useDocuments, useDocumentMutations } from '../../hooks/useDocuments'
+import { useCases } from '../../hooks/useCases'
+import { getStoredCompanyId } from '../../api/client'
 import {
-  initialDocuments,
+  buildDocumentFormData,
   documentTypeOptions,
-  documentCaseOptions,
-  createDocumentFromForm,
+  downloadDocumentFile,
   formatFileSize,
   formatMimeLabel,
-  calcDocumentsStats,
-  downloadDocumentStub,
-} from '../../data/documents'
+  parseApiError,
+} from '../../api/documents'
+
+function calcPageDocumentsStats(documents) {
+  const now = new Date()
+  const month = now.getMonth()
+  const year = now.getFullYear()
+
+  const linked = documents.filter((doc) => doc.caseId).length
+  const thisMonth = documents.filter((doc) => {
+    const iso = String(doc.uploadedAt || '')
+    if (!/^\d{4}-\d{2}-\d{2}/.test(iso)) return false
+    const [y, m] = iso.slice(0, 10).split('-').map(Number)
+    return y === year && m - 1 === month
+  }).length
+  const totalBytes = documents.reduce((sum, doc) => sum + (doc.sizeBytes || 0), 0)
+
+  return {
+    total: documents.length,
+    linked,
+    thisMonth,
+    spaceUsed: formatFileSize(totalBytes),
+  }
+}
 
 export default function DocumentsPage() {
   const { user } = useAuth()
   const isLawyer = user?.roleId === 'lawyer'
   const isClient = user?.roleId === 'client'
   const isAdmin = !isLawyer && !isClient
-  const [documents, setDocuments] = useState(initialDocuments)
+  const { documents, isLoading, error, refetch, isFetching } = useDocuments()
+  const { cases } = useCases()
+  const { create, update, remove } = useDocumentMutations()
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [caseFilter, setCaseFilter] = useState('')
   const [uploadOpen, setUploadOpen] = useState(false)
   const [detailsId, setDetailsId] = useState(null)
   const [notesId, setNotesId] = useState(null)
+  const [toast, setToast] = useState(null)
 
-  const scoped = useMemo(() => {
-    if (isLawyer) return getLawyerDocuments(user?.name, documents)
-    if (isClient) return getClientDocuments(user?.name, documents)
-    return documents
-  }, [documents, isLawyer, isClient, user?.name])
+  useEffect(() => {
+    if (!toast) return undefined
+    const id = window.setTimeout(() => setToast(null), 3200)
+    return () => window.clearTimeout(id)
+  }, [toast])
 
-  const roleCaseOptions = useMemo(() => {
-    if (isLawyer) {
-      const ids = getLawyerCaseIds(user?.name)
-      return documentCaseOptions.filter((item) => ids.has(item.id))
-    }
-    if (isClient) {
-      const ids = getClientCaseIds(user?.name)
-      return documentCaseOptions.filter((item) => ids.has(item.id))
-    }
-    return documentCaseOptions
-  }, [isLawyer, isClient, user?.name])
+  const showToast = (text, tone = 'success') => setToast({ text, tone })
+
+  const caseOptions = useMemo(
+    () =>
+      cases.map((item) => ({
+        id: String(item.id),
+        title: item.title,
+        number: item.number || item.case_number,
+      })),
+    [cases],
+  )
 
   const stats = useMemo(() => {
-    const base = calcDocumentsStats(scoped)
-    const images = scoped.filter((doc) =>
+    const base = calcPageDocumentsStats(documents)
+    const images = documents.filter((doc) =>
       String(doc.mimeType || '').startsWith('image/'),
     ).length
     return { ...base, images }
-  }, [scoped])
+  }, [documents])
+
+  const hasActiveFilters = Boolean(query.trim() || typeFilter || caseFilter)
+
+  const clearFilters = () => {
+    setQuery('')
+    setTypeFilter('')
+    setCaseFilter('')
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return scoped.filter((doc) => {
+    return documents.filter((doc) => {
       if (typeFilter && doc.docType !== typeFilter) return false
       if (caseFilter === 'none' && doc.caseId) return false
       if (caseFilter && caseFilter !== 'none' && doc.caseId !== caseFilter) return false
@@ -69,39 +103,94 @@ export default function DocumentsPage() {
         .toLowerCase()
         .includes(q)
     })
-  }, [scoped, query, typeFilter, caseFilter])
+  }, [documents, query, typeFilter, caseFilter])
 
   const detailsDoc = documents.find((item) => item.id === detailsId) || null
   const notesDoc = documents.find((item) => item.id === notesId) || null
 
-  const handleUpload = (form) => {
-    setDocuments((prev) => [
-      createDocumentFromForm({
-        ...form,
-        uploadedBy: user?.name || form.uploadedBy,
-      }),
-      ...prev,
-    ])
+  const handleUpload = async (form) => {
+    const fd = buildDocumentFormData(form, {
+      companyId: getStoredCompanyId(),
+      uploadedBy: user?.id,
+    })
+    try {
+      await create.mutateAsync(fd)
+      showToast('تم رفع المستند بنجاح')
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error')
+      throw err
+    }
   }
 
-  const handleDelete = (id) => {
-    setDocuments((prev) => prev.filter((item) => item.id !== id))
-    if (detailsId === id) setDetailsId(null)
-    if (notesId === id) setNotesId(null)
+  const handleDelete = async (id) => {
+    try {
+      await remove.mutateAsync(id)
+      if (detailsId === id) setDetailsId(null)
+      if (notesId === id) setNotesId(null)
+      showToast('تم حذف المستند')
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error')
+    }
   }
 
-  const handleSaveNotes = (id, notes) => {
-    setDocuments((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, notes } : item)),
-    )
+  const handleSaveNotes = async (id, notes) => {
+    try {
+      await update.mutateAsync({ id, values: { notes } })
+      showToast('تم حفظ الملاحظة')
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error')
+      throw err
+    }
   }
 
-  const handleDownload = (doc) => {
-    downloadDocumentStub(doc)
+  const handleDownload = async (doc) => {
+    try {
+      await downloadDocumentFile(doc)
+      showToast('جاري تحميل الملف...')
+    } catch (err) {
+      showToast(err?.message || parseApiError(err).message || 'تعذر تحميل الملف', 'error')
+    }
+  }
+
+  const handleExportCsv = () => {
+    const lines = [
+      'اسم الملف,الوصف,النوع,الحجم,القضية,تاريخ الرفع',
+      ...filtered.map((doc) =>
+        [
+          doc.fileName,
+          doc.description,
+          doc.docType,
+          formatFileSize(doc.sizeBytes),
+          doc.caseTitle || '—',
+          doc.uploadedAt,
+        ].join(','),
+      ),
+    ].join('\n')
+    const blob = new Blob(['\ufeff' + lines], {
+      type: 'text/csv;charset=utf-8',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'documents.csv'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    showToast('تم تصدير القائمة')
   }
 
   return (
     <div className="documents-page">
+      {toast ? (
+        <div
+          className={`toast toast--${toast.tone === 'error' ? 'error' : 'success'}`}
+          role="status"
+        >
+          {toast.text}
+        </div>
+      ) : null}
+
       <div className="stats-grid">
         <StatCard
           value={stats.total}
@@ -136,6 +225,20 @@ export default function DocumentsPage() {
       <div className="cases-toolbar">
         <h2 className="cases-toolbar__title">المستندات</h2>
         <div className="cases-toolbar__actions documents-toolbar__actions">
+          <button
+            type="button"
+            className="btn btn--ghost inline-flex items-center gap-2"
+            onClick={() => refetch()}
+            disabled={isLoading || isFetching}
+            title="تحديث"
+          >
+            <HiOutlineRefresh
+              size={18}
+              className={isFetching ? 'animate-spin' : undefined}
+              aria-hidden
+            />
+            تحديث
+          </button>
           <div className="search-field">
             <Icon name="search" className="search-field__icon" />
             <input
@@ -147,33 +250,30 @@ export default function DocumentsPage() {
               aria-label="بحث في المستندات"
             />
           </div>
-          <select
-            className="filter-select"
+          <FilterSelect
             value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
+            onChange={setTypeFilter}
             aria-label="تصفية حسب النوع"
-          >
-            <option value="">كل الأنواع</option>
-            {documentTypeOptions.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
-          <select
-            className="filter-select"
+            options={[
+              { value: '', label: 'كل الأنواع' },
+              ...documentTypeOptions.map((opt) => ({ value: opt, label: opt })),
+            ]}
+          />
+          <FilterSelect
             value={caseFilter}
-            onChange={(e) => setCaseFilter(e.target.value)}
+            onChange={setCaseFilter}
             aria-label="تصفية حسب القضية"
-          >
-            <option value="">كل القضايا</option>
-            <option value="none">بدون قضية</option>
-            {roleCaseOptions.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.title}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: '', label: 'كل القضايا' },
+              { value: 'none', label: 'بدون قضية' },
+              ...caseOptions.map((item) => ({ value: item.id, label: item.title })),
+            ]}
+          />
+          {hasActiveFilters ? (
+            <button type="button" className="btn btn--ghost" onClick={clearFilters}>
+              مسح الفلاتر
+            </button>
+          ) : null}
           <button
             type="button"
             className="btn btn--primary"
@@ -185,32 +285,7 @@ export default function DocumentsPage() {
           <button
             type="button"
             className="btn btn--ghost"
-            onClick={() => {
-              const lines = [
-                'اسم الملف,الوصف,النوع,الحجم,القضية,تاريخ الرفع',
-                ...filtered.map((doc) =>
-                  [
-                    doc.fileName,
-                    doc.description,
-                    doc.docType,
-                    formatFileSize(doc.sizeBytes),
-                    doc.caseTitle || '—',
-                    doc.uploadedAt,
-                  ].join(','),
-                ),
-              ].join('\n')
-              const blob = new Blob(['\ufeff' + lines], {
-                type: 'text/csv;charset=utf-8',
-              })
-              const url = URL.createObjectURL(blob)
-              const a = document.createElement('a')
-              a.href = url
-              a.download = 'documents.csv'
-              document.body.appendChild(a)
-              a.click()
-              a.remove()
-              URL.revokeObjectURL(url)
-            }}
+            onClick={handleExportCsv}
           >
             <Icon name="download" size={18} />
             تصدير
@@ -218,100 +293,129 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      <div className="table-card">
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>اسم الملف</th>
-                <th>الحجم</th>
-                <th>النوع</th>
-                <th>القضية</th>
-                <th>تاريخ الرفع</th>
-                <th>الإجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
+      {isLoading ? (
+        <div className="table-card flex flex-col items-center gap-4 px-6 py-12 text-center">
+          <HiOutlineRefresh size={28} className="animate-spin text-gold" aria-hidden />
+          <p>جاري تحميل المستندات...</p>
+        </div>
+      ) : null}
+
+      {!isLoading && error ? (
+        <div className="table-card flex flex-col items-center gap-4 px-6 py-12 text-center">
+          <span className="grid size-14 place-items-center rounded-2xl bg-rose-50 text-rose-600">
+            <HiOutlineExclamationCircle size={28} aria-hidden />
+          </span>
+          <div>
+            <p className="font-display text-base font-bold text-brand">تعذر تحميل المستندات</p>
+            <p className="mt-1 text-sm text-[#6b7f80]">{error}</p>
+          </div>
+          <button
+            type="button"
+            className="btn btn--primary inline-flex items-center gap-2"
+            onClick={() => refetch()}
+          >
+            <HiOutlineRefresh size={18} aria-hidden />
+            إعادة المحاولة
+          </button>
+        </div>
+      ) : null}
+
+      {!isLoading && !error ? (
+        <div className="table-card">
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
                 <tr>
-                  <td colSpan={6} className="data-table__empty">
-                    لا توجد مستندات مطابقة لبحثك
-                  </td>
+                  <th>اسم الملف</th>
+                  <th>الحجم</th>
+                  <th>النوع</th>
+                  <th>القضية</th>
+                  <th>تاريخ الرفع</th>
+                  <th>الإجراءات</th>
                 </tr>
-              ) : (
-                filtered.map((doc) => (
-                  <tr key={doc.id}>
-                    <td>
-                      <div className="doc-file-cell">
-                        <span className="doc-file-cell__name">{doc.fileName}</span>
-                        <span className="doc-file-cell__desc">{doc.description}</span>
-                      </div>
-                    </td>
-                    <td>{formatFileSize(doc.sizeBytes)}</td>
-                    <td>
-                      <span className="doc-mime">
-                        {formatMimeLabel(doc.mimeType, doc.fileName)}
-                      </span>
-                    </td>
-                    <td>{doc.caseTitle || '—'}</td>
-                    <td>{doc.uploadedAt}</td>
-                    <td>
-                      <div className="row-actions">
-                        <button
-                          type="button"
-                          className="action-btn action-btn--download"
-                          title="تحميل"
-                          aria-label={`تحميل ${doc.fileName}`}
-                          onClick={() => handleDownload(doc)}
-                        >
-                          <Icon name="download" size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          className="action-btn action-btn--view-gold"
-                          title="تفاصيل"
-                          aria-label={`تفاصيل ${doc.fileName}`}
-                          onClick={() => setDetailsId(doc.id)}
-                        >
-                          <Icon name="eye" size={16} />
-                        </button>
-                        {!isClient && (
-                          <button
-                            type="button"
-                            className="action-btn action-btn--notes"
-                            title="ملاحظات"
-                            aria-label={`ملاحظات ${doc.fileName}`}
-                            onClick={() => setNotesId(doc.id)}
-                          >
-                            <Icon name="annotation" size={16} />
-                          </button>
-                        )}
-                        {isAdmin && (
-                          <button
-                            type="button"
-                            className="action-btn action-btn--delete"
-                            title="حذف"
-                            aria-label={`حذف ${doc.fileName}`}
-                            onClick={() => handleDelete(doc.id)}
-                          >
-                            <Icon name="trash" size={16} />
-                          </button>
-                        )}
-                      </div>
+              </thead>
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="data-table__empty">
+                      لا توجد مستندات مطابقة لبحثك
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  filtered.map((doc) => (
+                    <tr key={doc.id}>
+                      <td>
+                        <div className="doc-file-cell">
+                          <span className="doc-file-cell__name">{doc.fileName}</span>
+                          <span className="doc-file-cell__desc">{doc.description}</span>
+                        </div>
+                      </td>
+                      <td>{formatFileSize(doc.sizeBytes)}</td>
+                      <td>
+                        <span className="doc-mime">
+                          {formatMimeLabel(doc.mimeType, doc.fileName)}
+                        </span>
+                      </td>
+                      <td>{doc.caseTitle || '—'}</td>
+                      <td>{doc.uploadedAt}</td>
+                      <td>
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="action-btn action-btn--download"
+                            title="تحميل"
+                            aria-label={`تحميل ${doc.fileName}`}
+                            onClick={() => handleDownload(doc)}
+                          >
+                            <Icon name="download" size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            className="action-btn action-btn--view-gold"
+                            title="تفاصيل"
+                            aria-label={`تفاصيل ${doc.fileName}`}
+                            onClick={() => setDetailsId(doc.id)}
+                          >
+                            <Icon name="eye" size={16} />
+                          </button>
+                          {!isClient && (
+                            <button
+                              type="button"
+                              className="action-btn action-btn--notes"
+                              title="ملاحظات"
+                              aria-label={`ملاحظات ${doc.fileName}`}
+                              onClick={() => setNotesId(doc.id)}
+                            >
+                              <Icon name="annotation" size={16} />
+                            </button>
+                          )}
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              className="action-btn action-btn--delete"
+                              title="حذف"
+                              aria-label={`حذف ${doc.fileName}`}
+                              onClick={() => handleDelete(doc.id)}
+                            >
+                              <Icon name="trash" size={16} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <UploadDocumentModal
         open={uploadOpen}
         onClose={() => setUploadOpen(false)}
         onSave={handleUpload}
-        caseOptions={roleCaseOptions}
+        caseOptions={caseOptions}
       />
 
       <DocumentDetailsModal

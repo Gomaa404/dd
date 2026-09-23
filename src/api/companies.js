@@ -144,11 +144,17 @@ export function buildCompanyFormData(values, { method } = {}) {
 }
 
 /** GET /companies — returns the tenants array. */
-export async function fetchCompanies() {
-  const { data } = await apiClient.get(COMPANIES_PATH)
+export async function fetchCompanies(params = {}) {
+  const { data } = await apiClient.get(COMPANIES_PATH, { params })
   if (Array.isArray(data?.data)) return data.data
   if (Array.isArray(data)) return data
   return []
+}
+
+/** GET /companies/{id} — single tenant. */
+export async function fetchCompany(id) {
+  const { data } = await apiClient.get(`${COMPANIES_PATH}/${id}`)
+  return data?.data ?? data ?? null
 }
 
 /** POST /companies (multipart). */

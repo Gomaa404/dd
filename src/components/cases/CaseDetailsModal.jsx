@@ -1,8 +1,18 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { Icon } from '../ui/Icon'
 import { AddEventModal } from './AddEventModal'
 import { UploadDocumentModal } from './UploadDocumentModal'
+import {
+  buildDocumentFormData,
+  createCaseDocument,
+  downloadDocumentFile,
+  fetchCaseDocuments,
+  normalizeDocument,
+  parseApiError as parseDocError,
+} from '../../api/documents'
+import { getStoredCompanyId } from '../../api/client'
+import { formatDisplayDate } from '../../utils/formatDisplay'
 
 const tabs = [
   { id: 'overview', label: 'نظرة عامة', icon: 'info' },
@@ -12,8 +22,10 @@ const tabs = [
 ]
 
 function statusClass(status) {
-  if (status === 'منتهي') return 'status-pill status-pill--done'
-  if (status === 'مؤجل') return 'status-pill status-pill--hold'
+  if (status === 'closed' || status === 'منتهي') {
+    return 'status-pill status-pill--done'
+  }
+  if (status === 'postponed' || status === 'مؤجل') return 'status-pill status-pill--hold'
   return 'status-pill status-pill--active'
 }
 
@@ -53,40 +65,107 @@ function MetaGrid({ items, cols = 2 }) {
   )
 }
 
+function mapDocForList(doc) {
+  return {
+    id: doc.id,
+    name: doc.description || doc.title || doc.fileName,
+    type: doc.docType || '—',
+    fileName: doc.fileName,
+    filePath: doc.filePath,
+    uploadedAt: doc.uploadedAt ? formatDisplayDate(doc.uploadedAt) : '—',
+    notes: doc.notes,
+    raw: doc.raw,
+  }
+}
+
 export function CaseDetailsModal({ open, caseData, onClose, onUpdate, readOnly = false }) {
   const [tab, setTab] = useState('overview')
   const [eventOpen, setEventOpen] = useState(false)
   const [docOpen, setDocOpen] = useState(false)
+  const [events, setEvents] = useState([])
+  const [documents, setDocuments] = useState([])
+  const [docsLoading, setDocsLoading] = useState(false)
+  const [docError, setDocError] = useState(null)
+
+  const loadDocuments = useCallback(async () => {
+    if (!caseData?.id) return
+    setDocsLoading(true)
+    setDocError(null)
+    try {
+      const list = await fetchCaseDocuments({ case_id: caseData.id })
+      setDocuments(list.map(normalizeDocument).map(mapDocForList))
+    } catch (err) {
+      setDocError(parseDocError(err).message)
+      setDocuments([])
+    } finally {
+      setDocsLoading(false)
+    }
+  }, [caseData?.id])
+
+  useEffect(() => {
+    if (!open || !caseData?.id) return
+    setEvents(Array.isArray(caseData.events) ? caseData.events : [])
+    loadDocuments()
+  }, [open, caseData?.id, caseData?.events, loadDocuments])
 
   if (!caseData) return null
 
   const displayStatus =
-    caseData.status === 'قيد' || caseData.status === 'نشطة' ? 'نشط' : caseData.status
+    caseData.statusUi ??
+    (caseData.status === 'قيد' || caseData.status === 'نشطة' ? 'نشط' : caseData.statusLabel ?? caseData.status)
+
+  const statusForPill = caseData.statusUi ?? caseData.statusLabel ?? caseData.status
+  const typeLabel = caseData.typeName ?? caseData.type?.name ?? caseData.type ?? '—'
+  const priorityDisplay = caseData.priorityLabel ?? caseData.priority
+  const stageDisplay = caseData.stageLabel ?? caseData.stage
 
   const handleAddEvent = (event) => {
     if (readOnly || !onUpdate) return
-    onUpdate({
-      ...caseData,
-      events: [event, ...(caseData.events || [])],
-    })
+    setEvents((prev) => [event, ...prev])
+    onUpdate()
   }
 
-  const handleAddDocument = (doc) => {
-    if (readOnly || !onUpdate) return
-    onUpdate({
-      ...caseData,
-      documents: [doc, ...(caseData.documents || [])],
-    })
+  const handleAddDocument = async (docForm) => {
+    if (readOnly || !onUpdate || !caseData?.id) return
+    const companyId = getStoredCompanyId()
+    const fd = buildDocumentFormData(
+      {
+        description: docForm.name,
+        fileName: docForm.fileName,
+        docType: docForm.type,
+        notes: docForm.notes,
+        caseId: String(caseData.id),
+        file: docForm.file,
+      },
+      { companyId },
+    )
+    try {
+      await createCaseDocument(fd)
+      await loadDocuments()
+      onUpdate()
+    } catch (err) {
+      setDocError(parseDocError(err).message)
+      throw err
+    }
+  }
+
+  const handleDownloadDoc = async (doc) => {
+    try {
+      await downloadDocumentFile(doc)
+    } catch (err) {
+      setDocError(err?.message || parseDocError(err).message || 'تعذر تحميل الملف')
+    }
   }
 
   const header = (
     <div className="details-header">
       <h2 className="details-header__title">{caseData.title}</h2>
       <div className="details-header__meta">
-        <span>رقم القضية: {caseData.number}</span>
-        <span>النوع: {caseData.type}</span>
+        <span>رقم القضية: {caseData.number ?? caseData.case_number}</span>
+        <span>النوع: {typeLabel}</span>
         <span className="details-header__status">
-          الحالة: <span className={statusClass(caseData.status)}>{displayStatus}</span>
+          الحالة:{' '}
+          <span className={statusClass(statusForPill)}>{displayStatus}</span>
         </span>
       </div>
     </div>
@@ -161,13 +240,13 @@ export function CaseDetailsModal({ open, caseData, onClose, onUpdate, readOnly =
                     {
                       label: 'الأولوية',
                       value: (
-                        <span className={priorityClass(caseData.priority)}>
-                          {caseData.priority}
+                        <span className={priorityClass(priorityDisplay)}>
+                          {priorityDisplay}
                         </span>
                       ),
                     },
                     { label: 'التصنيف', value: caseData.classification },
-                    { label: 'المرحلة الحالية', value: caseData.stage },
+                    { label: 'المرحلة الحالية', value: stageDisplay },
                     { label: 'تاريخ البدء', value: caseData.startDate },
                   ]}
                 />
@@ -177,9 +256,10 @@ export function CaseDetailsModal({ open, caseData, onClose, onUpdate, readOnly =
                 <p className="detail-text">
                   <strong>وصف القضية:</strong> {caseData.description}
                 </p>
-                {caseData.internalNotes ? (
+                {caseData.internalNotes || caseData.internal_notes ? (
                   <p className="detail-text">
-                    <strong>ملاحظات داخلية:</strong> {caseData.internalNotes}
+                    <strong>ملاحظات داخلية:</strong>{' '}
+                    {caseData.internalNotes ?? caseData.internal_notes}
                   </p>
                 ) : null}
               </DetailCard>
@@ -192,7 +272,10 @@ export function CaseDetailsModal({ open, caseData, onClose, onUpdate, readOnly =
                 <MetaGrid
                   cols={2}
                   items={[
-                    { label: 'الاسم', value: caseData.clientDetails?.name || caseData.client },
+                    {
+                      label: 'الاسم',
+                      value: caseData.clientDetails?.name || caseData.clientName || caseData.client,
+                    },
                     { label: 'رقم الهوية', value: caseData.clientDetails?.nationalId },
                     { label: 'الهاتف', value: caseData.clientDetails?.phone },
                     { label: 'العنوان', value: caseData.clientDetails?.address },
@@ -204,7 +287,10 @@ export function CaseDetailsModal({ open, caseData, onClose, onUpdate, readOnly =
                 <MetaGrid
                   cols={2}
                   items={[
-                    { label: 'الاسم', value: caseData.lawyerDetails?.name || caseData.lawyer },
+                    {
+                      label: 'الاسم',
+                      value: caseData.lawyerDetails?.name || caseData.lawyerName || caseData.lawyer,
+                    },
                     { label: 'الهاتف', value: caseData.lawyerDetails?.phone },
                     { label: 'البريد', value: caseData.lawyerDetails?.email },
                   ]}
@@ -238,14 +324,14 @@ export function CaseDetailsModal({ open, caseData, onClose, onUpdate, readOnly =
                   </button>
                 </div>
               ) : null}
-              {(caseData.events || []).length === 0 ? (
+              {events.length === 0 ? (
                 <div className="empty-panel">
                   <Icon name="clock" className="empty-panel__icon" />
                   <p>لا توجد أحداث مسجلة</p>
                 </div>
               ) : (
                 <div className="timeline">
-                  {caseData.events.map((event) => (
+                  {events.map((event) => (
                     <article key={event.id} className="timeline-item">
                       <div className="timeline-item__icon">
                         <Icon name="clock" />
@@ -287,14 +373,23 @@ export function CaseDetailsModal({ open, caseData, onClose, onUpdate, readOnly =
                   </button>
                 </div>
               ) : null}
-              {(caseData.documents || []).length === 0 ? (
+              {docError ? (
+                <p className="mb-3 text-sm text-rose-600" role="alert">
+                  {docError}
+                </p>
+              ) : null}
+              {docsLoading ? (
+                <div className="empty-panel">
+                  <p>جاري تحميل المستندات...</p>
+                </div>
+              ) : documents.length === 0 ? (
                 <div className="empty-panel">
                   <Icon name="documents" className="empty-panel__icon" />
                   <p>لا توجد مستندات مرفوعة</p>
                 </div>
               ) : (
                 <div className="docs-list">
-                  {caseData.documents.map((doc) => (
+                  {documents.map((doc) => (
                     <article key={doc.id} className="doc-item">
                       <div className="doc-item__icon">
                         <Icon name="folder" />
@@ -308,6 +403,15 @@ export function CaseDetailsModal({ open, caseData, onClose, onUpdate, readOnly =
                         </div>
                         {doc.notes ? <p>{doc.notes}</p> : null}
                       </div>
+                      <button
+                        type="button"
+                        className="action-btn action-btn--download"
+                        title="تحميل"
+                        aria-label={`تحميل ${doc.fileName || doc.name}`}
+                        onClick={() => handleDownloadDoc(doc)}
+                      >
+                        <Icon name="download" size={16} />
+                      </button>
                     </article>
                   ))}
                 </div>
@@ -326,7 +430,7 @@ export function CaseDetailsModal({ open, caseData, onClose, onUpdate, readOnly =
         open={docOpen}
         onClose={() => setDocOpen(false)}
         onSave={handleAddDocument}
-        caseLabel={`${caseData.number} — ${caseData.title}`}
+        caseLabel={`${caseData.number ?? caseData.case_number} — ${caseData.title}`}
       />
     </>
   )

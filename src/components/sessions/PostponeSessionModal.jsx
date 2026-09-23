@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { Icon } from '../ui/Icon'
 import { Field } from '../ui/Form'
-import { formatSessionDate } from '../../data/sessions'
+import { DateField } from '../ui/DateField'
+import { formatDisplayDate } from '../../utils/formatDisplay'
 
 export function PostponeSessionModal({ open, session, onClose, onPostpone }) {
   const [date, setDate] = useState('')
@@ -45,17 +46,16 @@ export function PostponeSessionModal({ open, session, onClose, onPostpone }) {
           <div>
             <strong>جلسة #{session.sessionNumber}</strong>
             <span>
-              {session.caseTitle} — التاريخ الحالي: {formatSessionDate(session.date)}
+              {session.caseTitle} — التاريخ الحالي: {formatDisplayDate(session.date)}
             </span>
           </div>
         </div>
 
         <Field label="التاريخ الجديد" required full>
-          <input
-            type="date"
-            className="input"
+          <DateField
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={setDate}
+            aria-label="التاريخ الجديد"
             required
           />
           <p className="field__hint">أدخل التاريخ الجديد للجلسة</p>

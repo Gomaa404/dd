@@ -2,16 +2,19 @@ import { useEffect, useMemo, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { FormSection, Field, FieldGrid } from '../ui/Form'
 import { Icon } from '../ui/Icon'
+import { DateField } from '../ui/DateField'
+import { FilterSelect } from '../ui/FilterSelect'
 import {
   emptyPaymentForm,
   paymentMethodOptions,
   formatMoney,
   remaining,
-} from '../../data/invoices'
+} from '../../api/invoices'
 
 export function RecordPaymentModal({ open, invoice, onClose, onSave }) {
   const [form, setForm] = useState(emptyPaymentForm)
   const [fileLabel, setFileLabel] = useState('اسحب الملف هنا أو انقر للاختيار')
+  const [submitting, setSubmitting] = useState(false)
 
   const due = invoice ? remaining(invoice) : 0
 
@@ -36,20 +39,26 @@ export function RecordPaymentModal({ open, invoice, onClose, onSave }) {
 
   if (!invoice) return null
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
     const amount = Number(form.amount) || 0
     if (amount <= 0 || amount > due) return
-    onSave(invoice.id, {
-      id: `p${Date.now()}`,
-      amount,
-      date: form.date,
-      method: form.method,
-      reference: form.reference.trim(),
-      notes: form.notes.trim(),
-      receiptName: form.receiptName,
-    })
-    onClose()
+    setSubmitting(true)
+    try {
+      await onSave?.(invoice.id, {
+        amount,
+        date: form.date,
+        method: form.method,
+        reference: form.reference.trim(),
+        notes: form.notes.trim(),
+        receiptName: form.receiptName,
+      })
+      onClose()
+    } catch {
+      /* parent surfaces error */
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -60,7 +69,12 @@ export function RecordPaymentModal({ open, invoice, onClose, onSave }) {
       wide
       footer={
         <>
-          <button type="submit" form="payment-form" className="btn btn--primary">
+          <button
+            type="submit"
+            form="payment-form"
+            className="btn btn--primary"
+            disabled={submitting}
+          >
             حفظ
           </button>
           <button type="button" className="btn btn--ghost" onClick={onClose}>
@@ -115,16 +129,22 @@ export function RecordPaymentModal({ open, invoice, onClose, onSave }) {
               <p className="field__hint">الحد الأقصى للدفع: {formatMoney(due)}</p>
             </Field>
             <Field label="تاريخ الدفع">
-              <input type="date" className="input" value={form.date} onChange={set('date')} />
+              <DateField
+                value={form.date}
+                onChange={(value) => set('date')({ target: { value } })}
+                aria-label="تاريخ الدفع"
+              />
             </Field>
             <Field label="طريقة الدفع" required>
-              <select className="input" value={form.method} onChange={set('method')} required>
-                {paymentMethodOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+              <FilterSelect
+                value={form.method}
+                onChange={(value) => set('method')({ target: { value } })}
+                aria-label="طريقة الدفع"
+                options={paymentMethodOptions.map((opt) => ({
+                  value: opt.label,
+                  label: opt.label,
+                }))}
+              />
             </Field>
             <Field label="رقم المرجع">
               <input

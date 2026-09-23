@@ -21,6 +21,17 @@ export default defineConfig({
         changeOrigin: true,
         secure: true,
       },
+      '/public': {
+        target: 'https://law.elmoroj.com',
+        changeOrigin: true,
+        secure: true,
+      },
     },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.js'],
+    css: false,
   },
 })

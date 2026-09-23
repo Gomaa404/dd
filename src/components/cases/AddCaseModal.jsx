@@ -1,48 +1,98 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Modal } from '../ui/Modal'
-import { FormSection, Field, FieldGrid } from '../ui/Form'
+import { FormSection, Field, FieldGrid, FormBanner } from '../ui/Form'
 import { Icon } from '../ui/Icon'
+import { DateField } from '../ui/DateField'
+import { FilterSelect } from '../ui/FilterSelect'
 import {
-  caseTypeOptions,
-  caseStatusOptions,
-  priorityOptions,
-  classificationOptions,
-  stageOptions,
-  clientOptions,
-  lawyerOptions,
+  buildCasePayload,
+  casePriorityUiOptions,
+  caseStageUiOptions,
+  caseStatusUiOptions,
   emptyCaseForm,
-} from '../../data/cases'
+  parseApiError,
+  validateCaseForm,
+} from '../../api/cases'
+import { getStoredCompanyId } from '../../api/client'
+import { mapApiFieldErrors } from '../../utils/validation'
 
-export function AddCaseModal({ open, onClose, onSave }) {
-  const [form, setForm] = useState(emptyCaseForm)
+const CASE_API_FIELD_MAP = {
+  case_number: 'number',
+  case_type_id: 'type',
+  client_id: 'client',
+  lawyer_id: 'lawyer',
+  court_name: 'courtName',
+  next_session_date: 'nextSession',
+}
+
+export function AddCaseModal({
+  open,
+  onClose,
+  onSave,
+  caseTypes = [],
+  caseCategories = [],
+  clients = [],
+  lawyers = [],
+}) {
+  const [form, setForm] = useState(() => ({ ...emptyCaseForm }))
   const [filesLabel, setFilesLabel] = useState('لم يتم اختيار ملف')
+  const [submitting, setSubmitting] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState({})
+  const [banner, setBanner] = useState('')
 
   const set = (key) => (e) => {
     setForm((prev) => ({ ...prev, [key]: e.target.value }))
+    setFieldErrors((prev) => ({ ...prev, [key]: '' }))
+    setBanner('')
   }
 
+  const inputClass = (key) => `input${fieldErrors[key] ? ' is-invalid' : ''}`
+
   const reset = () => {
-    setForm(emptyCaseForm)
+    setForm({ ...emptyCaseForm })
     setFilesLabel('لم يتم اختيار ملف')
+    setSubmitting(false)
+    setFieldErrors({})
+    setBanner('')
   }
+
+  useEffect(() => {
+    if (open) {
+      setForm({ ...emptyCaseForm })
+      setFilesLabel('لم يتم اختيار ملف')
+      setSubmitting(false)
+      setFieldErrors({})
+      setBanner('')
+    }
+  }, [open])
 
   const handleClose = () => {
     reset()
     onClose()
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!form.number.trim() || !form.title.trim() || !form.type || !form.client || !form.lawyer) {
+    const validation = validateCaseForm(form)
+    if (!validation.ok) {
+      setFieldErrors(validation.fieldErrors)
+      setBanner(validation.message)
       return
     }
-    onSave({
-      ...form,
-      status: form.status === 'نشطة' ? 'قيد' : form.status,
-      nextSession: form.nextSession || '—',
-    })
-    reset()
-    onClose()
+    setFieldErrors({})
+    setBanner('')
+    setSubmitting(true)
+    try {
+      await onSave(buildCasePayload(form, { companyId: getStoredCompanyId() }))
+      reset()
+    } catch (err) {
+      const parsed = parseApiError(err)
+      setBanner(parsed.message)
+      if (parsed.fieldErrors && Object.keys(parsed.fieldErrors).length) {
+        setFieldErrors(mapApiFieldErrors(parsed.fieldErrors, CASE_API_FIELD_MAP))
+      }
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -53,8 +103,13 @@ export function AddCaseModal({ open, onClose, onSave }) {
       wide
       footer={
         <>
-          <button type="submit" form="add-case-form" className="btn btn--primary">
-            حفظ
+          <button
+            type="submit"
+            form="add-case-form"
+            className="btn btn--primary"
+            disabled={submitting}
+          >
+            {submitting ? 'جاري الحفظ...' : 'حفظ'}
           </button>
           <button type="button" className="btn btn--ghost" onClick={handleClose}>
             إلغاء
@@ -63,63 +118,58 @@ export function AddCaseModal({ open, onClose, onSave }) {
       }
     >
       <form id="add-case-form" className="case-form" onSubmit={handleSubmit}>
+        <FormBanner>{banner}</FormBanner>
         <FormSection icon={<Icon name="info" />} title="المعلومات الأساسية">
           <FieldGrid>
-            <Field label="رقم القضية" required>
+            <Field label="رقم القضية" required error={fieldErrors.number}>
               <input
-                className="input"
+                className={inputClass('number')}
                 value={form.number}
                 onChange={set('number')}
                 placeholder="مثال: 2024/1234"
                 required
               />
             </Field>
-            <Field label="عنوان القضية" required>
+            <Field label="عنوان القضية" required error={fieldErrors.title}>
               <input
-                className="input"
+                className={inputClass('title')}
                 value={form.title}
                 onChange={set('title')}
                 placeholder="وصف مختصر للقضية"
                 required
               />
             </Field>
-            <Field label="نوع القضية" required>
-              <select
-                className="input"
+            <Field label="نوع القضية" required error={fieldErrors.type}>
+              <FilterSelect
                 value={form.type}
-                onChange={set('type')}
-                required
-              >
-                <option value="">اختر النوع</option>
-                {caseTypeOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+                onChange={(value) => set('type')({ target: { value } })}
+                aria-label="نوع القضية"
+                className={fieldErrors.type ? 'is-invalid' : ''}
+                options={[
+                  { value: '', label: 'اختر النوع' },
+                  ...caseTypes.map((opt) => ({
+                    value: String(opt.id),
+                    label: opt.name,
+                  })),
+                ]}
+              />
             </Field>
             <Field label="حالة القضية" required>
-              <select
-                className="input"
+              <FilterSelect
                 value={form.status}
-                onChange={set('status')}
-                required
-              >
-                {caseStatusOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+                onChange={(value) => set('status')({ target: { value } })}
+                aria-label="حالة القضية"
+                options={caseStatusUiOptions.map((opt) => ({ value: opt, label: opt }))}
+              />
             </Field>
           </FieldGrid>
         </FormSection>
 
         <FormSection icon={<Icon name="cases" />} title="معلومات المحكمة">
           <FieldGrid>
-            <Field label="اسم المحكمة" required>
+            <Field label="اسم المحكمة" required error={fieldErrors.courtName}>
               <input
-                className="input"
+                className={inputClass('courtName')}
                 value={form.courtName}
                 onChange={set('courtName')}
                 placeholder="مثال: محكمة الرياض العامة"
@@ -151,19 +201,18 @@ export function AddCaseModal({ open, onClose, onSave }) {
               />
             </Field>
             <Field label="تاريخ أول جلسة">
-              <input
-                className="input"
-                type="date"
+              <DateField
                 value={form.firstSession}
-                onChange={set('firstSession')}
+                onChange={(value) => set('firstSession')({ target: { value } })}
+                aria-label="تاريخ أول جلسة"
               />
             </Field>
-            <Field label="الجلسة القادمة">
-              <input
-                className="input"
-                type="date"
+            <Field label="الجلسة القادمة" error={fieldErrors.nextSession}>
+              <DateField
                 value={form.nextSession}
-                onChange={set('nextSession')}
+                onChange={(value) => set('nextSession')({ target: { value } })}
+                className={fieldErrors.nextSession ? 'is-invalid' : ''}
+                aria-label="الجلسة القادمة"
               />
             </Field>
           </FieldGrid>
@@ -171,35 +220,35 @@ export function AddCaseModal({ open, onClose, onSave }) {
 
         <FormSection icon={<Icon name="clients" />} title="الأطراف">
           <FieldGrid>
-            <Field label="الموكل" required full>
-              <select
-                className="input"
+            <Field label="الموكل" required full error={fieldErrors.client}>
+              <FilterSelect
                 value={form.client}
-                onChange={set('client')}
-                required
-              >
-                <option value="">اختر الموكل</option>
-                {clientOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+                onChange={(value) => set('client')({ target: { value } })}
+                aria-label="الموكل"
+                className={fieldErrors.client ? 'is-invalid' : ''}
+                options={[
+                  { value: '', label: 'اختر الموكل' },
+                  ...clients.map((opt) => ({
+                    value: String(opt.id),
+                    label: opt.full_name ?? opt.name,
+                  })),
+                ]}
+              />
             </Field>
-            <Field label="المحامي المسؤول" required full>
-              <select
-                className="input"
+            <Field label="المحامي المسؤول" required full error={fieldErrors.lawyer}>
+              <FilterSelect
                 value={form.lawyer}
-                onChange={set('lawyer')}
-                required
-              >
-                <option value="">اختر المحامي</option>
-                {lawyerOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+                onChange={(value) => set('lawyer')({ target: { value } })}
+                aria-label="المحامي المسؤول"
+                className={fieldErrors.lawyer ? 'is-invalid' : ''}
+                options={[
+                  { value: '', label: 'اختر المحامي' },
+                  ...lawyers.map((opt) => ({
+                    value: String(opt.id),
+                    label: opt.name,
+                  })),
+                ]}
+              />
             </Field>
             <Field label="الخصم (الطرف الآخر)" full>
               <input
@@ -288,35 +337,31 @@ export function AddCaseModal({ open, onClose, onSave }) {
         <FormSection icon={<Icon name="calendar" />} title="التواريخ المهمة">
           <FieldGrid>
             <Field label="تاريخ الواقعة">
-              <input
-                className="input"
-                type="date"
+              <DateField
                 value={form.incidentDate}
-                onChange={set('incidentDate')}
+                onChange={(value) => set('incidentDate')({ target: { value } })}
+                aria-label="تاريخ الواقعة"
               />
             </Field>
             <Field label="تاريخ التوكيل">
-              <input
-                className="input"
-                type="date"
+              <DateField
                 value={form.powerOfAttorneyDate}
-                onChange={set('powerOfAttorneyDate')}
+                onChange={(value) => set('powerOfAttorneyDate')({ target: { value } })}
+                aria-label="تاريخ التوكيل"
               />
             </Field>
             <Field label="تاريخ انتهاء التقادم">
-              <input
-                className="input"
-                type="date"
+              <DateField
                 value={form.limitationExpiry}
-                onChange={set('limitationExpiry')}
+                onChange={(value) => set('limitationExpiry')({ target: { value } })}
+                aria-label="تاريخ انتهاء التقادم"
               />
             </Field>
             <Field label="الموعد النهائي للحكم">
-              <input
-                className="input"
-                type="date"
+              <DateField
                 value={form.judgmentDeadline}
-                onChange={set('judgmentDeadline')}
+                onChange={(value) => set('judgmentDeadline')({ target: { value } })}
+                aria-label="الموعد النهائي للحكم"
               />
             </Field>
           </FieldGrid>
@@ -325,44 +370,34 @@ export function AddCaseModal({ open, onClose, onSave }) {
         <FormSection icon={<Icon name="alert" />} title="الأولوية والتصنيف">
           <FieldGrid>
             <Field label="مستوى الأولوية">
-              <select
-                className="input"
+              <FilterSelect
                 value={form.priority}
-                onChange={set('priority')}
-              >
-                {priorityOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+                onChange={(value) => set('priority')({ target: { value } })}
+                aria-label="مستوى الأولوية"
+                options={casePriorityUiOptions.map((opt) => ({ value: opt, label: opt }))}
+              />
             </Field>
             <Field label="التصنيف">
-              <select
-                className="input"
+              <FilterSelect
                 value={form.classification}
-                onChange={set('classification')}
-              >
-                <option value="">اختر التصنيف</option>
-                {classificationOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+                onChange={(value) => set('classification')({ target: { value } })}
+                aria-label="التصنيف"
+                options={[
+                  { value: '', label: 'اختر التصنيف' },
+                  ...caseCategories.map((opt) => ({
+                    value: String(opt.id),
+                    label: opt.name,
+                  })),
+                ]}
+              />
             </Field>
             <Field label="المرحلة الحالية" full>
-              <select
-                className="input"
+              <FilterSelect
                 value={form.stage}
-                onChange={set('stage')}
-              >
-                {stageOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+                onChange={(value) => set('stage')({ target: { value } })}
+                aria-label="المرحلة الحالية"
+                options={caseStageUiOptions.map((opt) => ({ value: opt, label: opt }))}
+              />
             </Field>
           </FieldGrid>
         </FormSection>

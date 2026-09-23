@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Modal } from '../ui/Modal'
-import { Field, FieldGrid } from '../ui/Form'
+import { Field, FieldGrid, FormBanner } from '../ui/Form'
 import { Icon } from '../ui/Icon'
+import { DateField } from '../ui/DateField'
+import { TimeField } from '../ui/TimeField'
+import { FilterSelect } from '../ui/FilterSelect'
 import {
-  appointmentCases,
-  appointmentClients,
-  appointmentLawyers,
   appointmentTypeOptions,
   emptyAppointmentForm,
-} from '../../data/appointments'
+  appointmentToForm,
+  validateAppointmentForm,
+} from '../../api/appointments'
 
 export function AppointmentFormModal({
   open,
@@ -17,24 +19,23 @@ export function AppointmentFormModal({
   onSave,
   mode = 'admin',
   lockedClientId = '',
-  caseOptions,
+  clientOptions = [],
+  lawyerOptions = [],
+  caseOptions = [],
 }) {
   const [form, setForm] = useState(emptyAppointmentForm)
+  const [fieldErrors, setFieldErrors] = useState({})
+  const [banner, setBanner] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const isClient = mode === 'client'
-  const casesList = caseOptions || appointmentCases
 
   useEffect(() => {
     if (!open) return
+    setFieldErrors({})
+    setBanner('')
+    setSubmitting(false)
     if (appointment) {
-      setForm({
-        date: appointment.date,
-        time: appointment.time,
-        lawyerId: appointment.lawyerId,
-        clientId: appointment.clientId,
-        caseId: appointment.caseId,
-        type: appointment.type,
-        notes: appointment.notes === 'لا توجد ملاحظات' ? '' : appointment.notes,
-      })
+      setForm(appointmentToForm(appointment))
       return
     }
     setForm({
@@ -45,14 +46,36 @@ export function AppointmentFormModal({
 
   const set = (key) => (event) => {
     setForm((current) => ({ ...current, [key]: event.target.value }))
+    setFieldErrors((prev) => ({ ...prev, [key]: '' }))
+    setBanner('')
   }
 
-  const handleSubmit = (event) => {
+  const inputClass = (key) => `input${fieldErrors[key] ? ' is-invalid' : ''}`
+
+  const handleSubmit = async (event) => {
     event.preventDefault()
+    if (submitting) return
     const clientId = isClient ? lockedClientId || form.clientId : form.clientId
-    if (!form.date || !form.time || !clientId) return
-    onSave({ ...form, clientId })
-    onClose()
+    const validation = validateAppointmentForm(
+      { ...form, clientId },
+      { requireClient: !isClient },
+    )
+    if (!validation.ok) {
+      setFieldErrors(validation.fieldErrors)
+      setBanner(validation.message)
+      return
+    }
+    setFieldErrors({})
+    setBanner('')
+    setSubmitting(true)
+    try {
+      await onSave?.({ ...form, clientId })
+      onClose()
+    } catch {
+      /* parent may surface toast */
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -63,8 +86,13 @@ export function AppointmentFormModal({
       wide
       footer={
         <>
-          <button type="submit" form="appointment-form" className="btn btn--primary">
-            حفظ
+          <button
+            type="submit"
+            form="appointment-form"
+            className="btn btn--primary"
+            disabled={submitting}
+          >
+            {submitting ? 'جاري الحفظ...' : 'حفظ'}
           </button>
           <button type="button" className="btn btn--ghost" onClick={onClose}>
             إلغاء
@@ -72,23 +100,24 @@ export function AppointmentFormModal({
         </>
       }
     >
-      <form id="appointment-form" className="appointment-form" onSubmit={handleSubmit}>
+      <form id="appointment-form" className="appointment-form" onSubmit={handleSubmit} noValidate>
+        <FormBanner>{banner}</FormBanner>
         <FieldGrid cols={2}>
-          <Field label="التاريخ" required>
-            <input
-              type="date"
-              className="input"
+          <Field label="التاريخ" required error={fieldErrors.date}>
+            <DateField
               value={form.date}
-              onChange={set('date')}
+              onChange={(value) => set('date')({ target: { value } })}
+              className={fieldErrors.date ? 'is-invalid' : ''}
+              aria-label="التاريخ"
               required
             />
           </Field>
-          <Field label="الوقت" required>
-            <input
-              type="time"
-              className="input"
+          <Field label="الوقت" required error={fieldErrors.time}>
+            <TimeField
               value={form.time}
-              onChange={set('time')}
+              onChange={(value) => set('time')({ target: { value } })}
+              className={fieldErrors.time ? 'is-invalid' : ''}
+              aria-label="الوقت"
               required
             />
           </Field>
@@ -103,55 +132,63 @@ export function AppointmentFormModal({
               : undefined
           }
         >
-          <select className="input" value={form.lawyerId} onChange={set('lawyerId')}>
-            <option value="">
-              {isClient ? '-- سيتم التعيين لاحقاً --' : '-- اختر محامي --'}
-            </option>
-            {appointmentLawyers.map((lawyer) => (
-              <option key={lawyer.id} value={lawyer.id}>
-                {lawyer.name}
-              </option>
-            ))}
-          </select>
+          <FilterSelect
+            value={form.lawyerId}
+            onChange={(value) => set('lawyerId')({ target: { value } })}
+            aria-label={isClient ? 'المحامي (اختياري)' : 'المحامي'}
+            options={[
+              {
+                value: '',
+                label: isClient ? '-- سيتم التعيين لاحقاً --' : '-- اختر محامي --',
+              },
+              ...lawyerOptions.map((lawyer) => ({
+                value: lawyer.id,
+                label: lawyer.name,
+              })),
+            ]}
+          />
         </Field>
 
         {!isClient ? (
-          <Field label="الموكل" required full>
-            <select
-              className="input"
+          <Field label="الموكل" required full error={fieldErrors.clientId}>
+            <FilterSelect
               value={form.clientId}
-              onChange={set('clientId')}
-              required
-            >
-              <option value="">-- اختر الموكل --</option>
-              {appointmentClients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.name}
-                </option>
-              ))}
-            </select>
+              onChange={(value) => set('clientId')({ target: { value } })}
+              aria-label="الموكل"
+              className={fieldErrors.clientId ? 'is-invalid' : ''}
+              options={[
+                { value: '', label: '-- اختر الموكل --' },
+                ...clientOptions.map((client) => ({
+                  value: client.id,
+                  label: client.name,
+                })),
+              ]}
+            />
           </Field>
         ) : null}
 
         <Field label="القضية المرتبطة (اختياري)" full>
-          <select className="input" value={form.caseId} onChange={set('caseId')}>
-            <option value="">-- بدون قضية (اختياري) --</option>
-            {casesList.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.title} (#{item.number})
-              </option>
-            ))}
-          </select>
+          <FilterSelect
+            value={form.caseId}
+            onChange={(value) => set('caseId')({ target: { value } })}
+            aria-label="القضية المرتبطة (اختياري)"
+            options={[
+              { value: '', label: '-- بدون قضية (اختياري) --' },
+              ...caseOptions.map((item) => ({
+                value: item.id,
+                label: `${item.title} (#${item.number})`,
+              })),
+            ]}
+          />
         </Field>
 
         <Field label="نوع الموعد" full>
-          <select className="input" value={form.type} onChange={set('type')}>
-            {appointmentTypeOptions.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
+          <FilterSelect
+            value={form.type}
+            onChange={(value) => set('type')({ target: { value } })}
+            aria-label="نوع الموعد"
+            options={appointmentTypeOptions.map((type) => ({ value: type, label: type }))}
+          />
         </Field>
 
         <Field label="ملاحظات" full>

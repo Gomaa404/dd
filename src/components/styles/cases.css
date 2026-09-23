@@ -67,7 +67,7 @@
 .cases-toolbar__actions {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.65rem;
   flex-wrap: wrap;
 }
 
@@ -79,7 +79,7 @@
 
 .search-field__icon {
   position: absolute;
-  inset-inline-start: 0.85rem;
+  inset-inline-start: 0.95rem;
   color: var(--text-muted);
   pointer-events: none;
   transition: color var(--transition);
@@ -87,13 +87,16 @@
 
 .search-field__input {
   width: min(280px, 70vw);
-  padding-block: 0.7rem;
-  padding-inline: 2.5rem 1rem;
+  height: 42px;
+  padding-block: 0;
+  padding-inline: 2.65rem 1.1rem;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--grad-surface);
   color: var(--text-h);
   font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
   transition:
     border-color var(--transition),
     box-shadow var(--transition),
@@ -208,43 +211,6 @@
 .status-pill--hold {
   background: linear-gradient(135deg, #fff4e5, #ffe8c7);
   color: #c47a1a;
-}
-
-.row-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.action-btn {
-  width: 34px;
-  height: 34px;
-  border: none;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  transition: transform var(--transition), box-shadow var(--transition), filter var(--transition);
-}
-
-.action-btn:hover {
-  transform: translateY(-2px) scale(1.05);
-  filter: brightness(1.05);
-}
-
-.action-btn--view {
-  background: linear-gradient(145deg, #4d8fd4, #3a6ea5);
-  box-shadow: 0 4px 12px rgba(58, 110, 165, 0.3);
-}
-
-.action-btn--edit {
-  background: linear-gradient(145deg, #e0a04a, #c47a1a);
-  box-shadow: 0 4px 12px rgba(196, 122, 26, 0.3);
-}
-
-.action-btn--delete {
-  background: linear-gradient(145deg, #e05a5a, #c44545);
-  box-shadow: 0 4px 12px rgba(196, 69, 69, 0.3);
 }
 
 /* —— Form —— */
@@ -581,6 +547,7 @@
 .timeline-item,
 .doc-item {
   display: flex;
+  align-items: center;
   gap: 0.85rem;
   padding: 0.95rem 1rem;
   border-radius: 12px;
@@ -594,6 +561,11 @@
   border-color: rgba(196, 163, 90, 0.45);
   box-shadow: var(--shadow-sm);
   transform: translateY(-1px);
+}
+
+.doc-item__body {
+  flex: 1;
+  min-width: 0;
 }
 
 .timeline-item__icon,
@@ -679,15 +651,5 @@
   .data-table td {
     padding: 0.75rem 0.65rem;
     font-size: 0.84rem;
-  }
-
-  .action-btn {
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-  }
-
-  .row-actions {
-    gap: 0.3rem;
   }
 }

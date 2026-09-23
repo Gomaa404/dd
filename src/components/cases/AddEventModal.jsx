@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { Field, FieldGrid } from '../ui/Form'
-import { eventTypeOptions, eventImportanceOptions } from '../../data/cases'
+import { DateField } from '../ui/DateField'
+import { FilterSelect } from '../ui/FilterSelect'
+import { caseEventImportanceOptions, caseEventTypeOptions } from '../../api/cases'
 
 const emptyEvent = {
   title: '',
@@ -64,35 +66,31 @@ export function AddEventModal({ open, onClose, onSave }) {
             />
           </Field>
           <Field label="نوع الحدث">
-            <select className="input" value={form.type} onChange={set('type')}>
-              {eventTypeOptions.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
+            <FilterSelect
+              value={form.type}
+              onChange={(value) => set('type')({ target: { value } })}
+              aria-label="نوع الحدث"
+              options={caseEventTypeOptions.map((opt) => ({ value: opt, label: opt }))}
+            />
           </Field>
           <Field label="تاريخ الحدث" required>
-            <input
-              className="input"
-              type="date"
+            <DateField
               value={form.date}
-              onChange={set('date')}
+              onChange={(value) => set('date')({ target: { value } })}
+              aria-label="تاريخ الحدث"
               required
             />
           </Field>
           <Field label="الأهمية">
-            <select
-              className="input"
+            <FilterSelect
               value={form.importance}
-              onChange={set('importance')}
-            >
-              {eventImportanceOptions.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
-                </option>
-              ))}
-            </select>
+              onChange={(value) => set('importance')({ target: { value } })}
+              aria-label="الأهمية"
+              options={caseEventImportanceOptions.map((opt) => ({
+                value: opt,
+                label: opt,
+              }))}
+            />
           </Field>
           <Field label="تفاصيل الحدث">
             <textarea
@@ -103,7 +101,7 @@ export function AddEventModal({ open, onClose, onSave }) {
               placeholder="اكتب تفاصيل ما حدث في هذا التاريخ..."
             />
           </Field>
-          <label className="check-row">
+          <label className="field-check">
             <input
               type="checkbox"
               checked={form.reminder}

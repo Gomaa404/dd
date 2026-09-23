@@ -1,6 +1,6 @@
 import { Modal } from '../ui/Modal'
 import { Icon } from '../ui/Icon'
-import { formatAppointmentDate } from '../../data/appointments'
+import { formatDisplayDate } from '../../utils/formatDisplay'
 
 export function AppointmentDetailsModal({ open, appointment, onClose }) {
   if (!appointment) return null
@@ -22,7 +22,7 @@ export function AppointmentDetailsModal({ open, appointment, onClose }) {
           <div className="appointment-details__grid">
             <div>
               <span>التاريخ:</span>
-              <strong>{formatAppointmentDate(appointment.date)}</strong>
+              <strong>{formatDisplayDate(appointment.date)}</strong>
             </div>
             <div>
               <span>الوقت:</span>

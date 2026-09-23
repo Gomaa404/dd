@@ -7,6 +7,8 @@ import {
 } from 'react-icons/hi'
 import { Modal } from '../ui/Modal'
 import { Icon } from '../ui/Icon'
+import { DateField } from '../ui/DateField'
+import { FilterSelect } from '../ui/FilterSelect'
 import {
   companyStatusOptions,
   createCompany,
@@ -390,18 +392,18 @@ export function CompanyFormModal({ open, mode = 'add', company = null, onClose, 
                 htmlFor="modal-company-plan"
                 error={errors.subscription_plan}
               >
-                <select
-                  id="modal-company-plan"
-                  className={fieldClass(Boolean(errors.subscription_plan))}
+                <FilterSelect
                   value={form.subscription_plan}
-                  onChange={setField('subscription_plan')}
-                >
-                  {subscriptionPlanOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(value) =>
+                    setField('subscription_plan')({ target: { value } })
+                  }
+                  aria-label="خطة الاشتراك"
+                  className={errors.subscription_plan ? 'is-invalid' : ''}
+                  options={subscriptionPlanOptions.map((opt) => ({
+                    value: opt.value,
+                    label: opt.label,
+                  }))}
+                />
               </Field>
               <Field
                 label="حالة الاشتراك"
@@ -409,18 +411,16 @@ export function CompanyFormModal({ open, mode = 'add', company = null, onClose, 
                 htmlFor="modal-company-status"
                 error={errors.status}
               >
-                <select
-                  id="modal-company-status"
-                  className={fieldClass(Boolean(errors.status))}
+                <FilterSelect
                   value={form.status}
-                  onChange={setField('status')}
-                >
-                  {companyStatusOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(value) => setField('status')({ target: { value } })}
+                  aria-label="حالة الاشتراك"
+                  className={errors.status ? 'is-invalid' : ''}
+                  options={companyStatusOptions.map((opt) => ({
+                    value: opt.value,
+                    label: opt.label,
+                  }))}
+                />
               </Field>
               <Field
                 label="بداية الاشتراك"
@@ -428,12 +428,12 @@ export function CompanyFormModal({ open, mode = 'add', company = null, onClose, 
                 htmlFor="modal-company-start"
                 error={errors.subscription_start}
               >
-                <input
-                  id="modal-company-start"
-                  type="date"
-                  className={fieldClass(Boolean(errors.subscription_start))}
+                <DateField
                   value={form.subscription_start}
-                  onChange={setField('subscription_start')}
+                  onChange={(value) => setField('subscription_start')({ target: { value } })}
+                  className={errors.subscription_start ? 'is-invalid' : ''}
+                  aria-label="بداية الاشتراك"
+                  required
                 />
               </Field>
               <Field
@@ -442,12 +442,12 @@ export function CompanyFormModal({ open, mode = 'add', company = null, onClose, 
                 htmlFor="modal-company-end"
                 error={errors.subscription_end}
               >
-                <input
-                  id="modal-company-end"
-                  type="date"
-                  className={fieldClass(Boolean(errors.subscription_end))}
+                <DateField
                   value={form.subscription_end}
-                  onChange={setField('subscription_end')}
+                  onChange={(value) => setField('subscription_end')({ target: { value } })}
+                  className={errors.subscription_end ? 'is-invalid' : ''}
+                  aria-label="نهاية الاشتراك"
+                  required
                 />
               </Field>
             </div>

@@ -36,12 +36,12 @@ import {
   HiOutlineReceiptTax,
   HiOutlineLogin,
   HiOutlineOfficeBuilding,
+  HiOutlineCollection,
 } from 'react-icons/hi'
-import { MdOutlineGavel } from 'react-icons/md'
 
 const map = {
   home: HiOutlineHome,
-  cases: MdOutlineGavel,
+  cases: HiOutlineCollection,
   sessions: HiOutlineBriefcase,
   appointments: HiOutlineCalendar,
   documents: HiOutlineDocumentText,

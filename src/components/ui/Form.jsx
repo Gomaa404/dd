@@ -10,19 +10,34 @@ export function FormSection({ icon, title, children }) {
   )
 }
 
-export function Field({ label, required, children, full, hint }) {
+export function Field({ label, required, children, full, hint, error }) {
   return (
-    <label className={`field${full ? ' field--full' : ''}`}>
+    <label className={`field${full ? ' field--full' : ''}${error ? ' field--invalid' : ''}`}>
       <span className="field__label">
         {label}
         {required ? <span className="field__req">*</span> : null}
       </span>
       {children}
-      {hint ? <span className="field__hint">{hint}</span> : null}
+      {error ? (
+        <span className="field__error" role="alert">
+          {error}
+        </span>
+      ) : hint ? (
+        <span className="field__hint">{hint}</span>
+      ) : null}
     </label>
   )
 }
 
 export function FieldGrid({ children, cols = 2 }) {
   return <div className={`field-grid field-grid--${cols}`}>{children}</div>
+}
+
+export function FormBanner({ children }) {
+  if (!children) return null
+  return (
+    <p className="form-banner" role="alert">
+      {children}
+    </p>
+  )
 }

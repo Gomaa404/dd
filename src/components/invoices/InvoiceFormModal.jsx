@@ -1,39 +1,37 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Modal } from '../ui/Modal'
-import { FormSection, Field, FieldGrid } from '../ui/Form'
+import { FormSection, Field, FieldGrid, FormBanner } from '../ui/Form'
 import { Icon } from '../ui/Icon'
+import { DateField } from '../ui/DateField'
+import { FilterSelect } from '../ui/FilterSelect'
+import { useClients } from '../../hooks/useClients'
+import { useCases } from '../../hooks/useCases'
 import {
   emptyInvoiceForm,
-  invoiceClients,
-  invoiceCases,
   invoiceStatusOptions,
   paymentMethodOptions,
   deriveStatus,
   generateInvoiceNumber,
-} from '../../data/invoices'
+  invoiceToForm,
+  validateInvoiceForm,
+} from '../../api/invoices'
 
 export function InvoiceFormModal({ open, invoice, onClose, onSave }) {
   const [form, setForm] = useState(emptyInvoiceForm)
+  const [submitting, setSubmitting] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState({})
+  const [banner, setBanner] = useState('')
   const isEdit = Boolean(invoice)
+  const { clients, isLoading: clientsLoading } = useClients()
+  const { cases, isLoading: casesLoading } = useCases()
 
   useEffect(() => {
     if (!open) return
+    setFieldErrors({})
+    setBanner('')
     setForm(
       invoice
-        ? {
-            number: invoice.number,
-            issueDate: invoice.issueDate,
-            dueDate: invoice.dueDate,
-            clientId: invoice.clientId,
-            caseId: invoice.caseId,
-            description: invoice.description,
-            total: String(invoice.total ?? ''),
-            paid: String(invoice.paid ?? ''),
-            status: invoice.status,
-            items: invoice.items || [],
-            paymentMethod: invoice.paymentMethod || '',
-            notes: invoice.notes || '',
-          }
+        ? invoiceToForm(invoice)
         : {
             ...emptyInvoiceForm,
             number: generateInvoiceNumber(),
@@ -44,14 +42,18 @@ export function InvoiceFormModal({ open, invoice, onClose, onSave }) {
 
   const set = (key) => (e) => {
     setForm((prev) => ({ ...prev, [key]: e.target.value }))
+    setFieldErrors((prev) => ({ ...prev, [key]: '' }))
+    setBanner('')
   }
+
+  const inputClass = (key) => `input${fieldErrors[key] ? ' is-invalid' : ''}`
 
   const itemsTotal = useMemo(
     () => (form.items || []).reduce((sum, it) => sum + (Number(it.amount) || 0), 0),
     [form.items],
   )
 
-  const remaining = Math.max(
+  const remainingAmount = Math.max(
     0,
     (Number(form.total) || 0) - (Number(form.paid) || 0),
   )
@@ -81,11 +83,26 @@ export function InvoiceFormModal({ open, invoice, onClose, onSave }) {
     }))
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!form.clientId || !form.description.trim() || !form.total) return
-    onSave({ ...form, status: form.status || autoStatus })
-    onClose()
+    if (submitting) return
+    const validation = validateInvoiceForm(form)
+    if (!validation.ok) {
+      setFieldErrors(validation.fieldErrors)
+      setBanner(validation.message)
+      return
+    }
+    setFieldErrors({})
+    setBanner('')
+    setSubmitting(true)
+    try {
+      await onSave?.({ ...form, status: form.status || autoStatus })
+      onClose()
+    } catch {
+      /* parent surfaces error */
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -96,7 +113,12 @@ export function InvoiceFormModal({ open, invoice, onClose, onSave }) {
       wide
       footer={
         <>
-          <button type="submit" form="invoice-form" className="btn btn--primary">
+          <button
+            type="submit"
+            form="invoice-form"
+            className="btn btn--primary"
+            disabled={submitting || clientsLoading || casesLoading}
+          >
             حفظ
           </button>
           <button type="button" className="btn btn--ghost" onClick={onClose}>
@@ -105,54 +127,61 @@ export function InvoiceFormModal({ open, invoice, onClose, onSave }) {
         </>
       }
     >
-      <form id="invoice-form" className="case-form" onSubmit={handleSubmit}>
+      <form id="invoice-form" className="case-form" onSubmit={handleSubmit} noValidate>
+        <FormBanner>{banner}</FormBanner>
         <FormSection icon={<Icon name="invoices" />} title="معلومات الفاتورة">
           <FieldGrid cols={2}>
             <Field label="رقم الفاتورة" required>
               <input className="input" value={form.number} onChange={set('number')} readOnly />
             </Field>
-            <Field label="تاريخ الإصدار" required>
-              <input
-                type="date"
-                className="input"
+            <Field label="تاريخ الإصدار" required error={fieldErrors.issueDate}>
+              <DateField
                 value={form.issueDate}
-                onChange={set('issueDate')}
+                onChange={(value) => set('issueDate')({ target: { value } })}
+                className={fieldErrors.issueDate ? 'is-invalid' : ''}
+                aria-label="تاريخ الإصدار"
                 required
               />
             </Field>
-            <Field label="الموكل" required>
-              <select
-                className="input"
+            <Field label="الموكل" required error={fieldErrors.clientId}>
+              <FilterSelect
                 value={form.clientId}
-                onChange={set('clientId')}
-                required
-              >
-                <option value="">اختر الموكل</option>
-                {invoiceClients.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(value) => set('clientId')({ target: { value } })}
+                aria-label="الموكل"
+                className={fieldErrors.clientId ? 'is-invalid' : ''}
+                disabled={clientsLoading}
+                options={[
+                  { value: '', label: 'اختر الموكل' },
+                  ...clients.map((item) => ({
+                    value: String(item.id),
+                    label: item.name,
+                  })),
+                ]}
+              />
             </Field>
             <Field label="القضية (اختياري)">
-              <select className="input" value={form.caseId} onChange={set('caseId')}>
-                <option value="">اختر القضية</option>
-                {invoiceCases.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.title} (#{item.number})
-                  </option>
-                ))}
-              </select>
+              <FilterSelect
+                value={form.caseId}
+                onChange={(value) => set('caseId')({ target: { value } })}
+                aria-label="القضية (اختياري)"
+                disabled={casesLoading}
+                options={[
+                  { value: '', label: 'اختر القضية' },
+                  ...cases.map((item) => ({
+                    value: String(item.id),
+                    label: `${item.title} (#${item.number})`,
+                  })),
+                ]}
+              />
             </Field>
           </FieldGrid>
         </FormSection>
 
         <FormSection icon={<Icon name="cash" />} title="تفاصيل المبالغ">
           <FieldGrid cols={2}>
-            <Field label="وصف الفاتورة" required full>
+            <Field label="وصف الفاتورة" required full error={fieldErrors.description}>
               <textarea
-                className="input input--area"
+                className={`input input--area${fieldErrors.description ? ' is-invalid' : ''}`}
                 rows={3}
                 value={form.description}
                 onChange={set('description')}
@@ -160,24 +189,24 @@ export function InvoiceFormModal({ open, invoice, onClose, onSave }) {
                 required
               />
             </Field>
-            <Field label="المبلغ الإجمالي" required>
+            <Field label="المبلغ الإجمالي" required error={fieldErrors.total}>
               <input
                 type="number"
                 min="0"
                 step="0.01"
-                className="input"
+                className={inputClass('total')}
                 value={form.total}
                 onChange={set('total')}
                 placeholder="0.00"
                 required
               />
             </Field>
-            <Field label="المبلغ المدفوع">
+            <Field label="المبلغ المدفوع" error={fieldErrors.paid}>
               <input
                 type="number"
                 min="0"
                 step="0.01"
-                className="input"
+                className={inputClass('paid')}
                 value={form.paid}
                 onChange={set('paid')}
                 placeholder="0"
@@ -186,31 +215,29 @@ export function InvoiceFormModal({ open, invoice, onClose, onSave }) {
             <Field label="المبلغ المتبقي">
               <input
                 className="input"
-                value={remaining.toFixed(2)}
+                value={remainingAmount.toFixed(2)}
                 readOnly
                 tabIndex={-1}
               />
             </Field>
             <Field label="تاريخ الاستحقاق">
-              <input
-                type="date"
-                className="input"
+              <DateField
                 value={form.dueDate}
-                onChange={set('dueDate')}
+                onChange={(value) => set('dueDate')({ target: { value } })}
+                aria-label="تاريخ الاستحقاق"
               />
             </Field>
             <Field label="حالة الفاتورة" full>
-              <select
-                className={`input invoice-status-select invoice-status-select--${statusKey(form.status)}`}
+              <FilterSelect
                 value={form.status}
-                onChange={set('status')}
-              >
-                {invoiceStatusOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+                onChange={(value) => set('status')({ target: { value } })}
+                aria-label="حالة الفاتورة"
+                className={`invoice-status-select invoice-status-select--${statusKey(form.status)}`}
+                options={invoiceStatusOptions.map((opt) => ({
+                  value: opt.label,
+                  label: opt.label,
+                }))}
+              />
             </Field>
           </FieldGrid>
         </FormSection>
@@ -261,18 +288,18 @@ export function InvoiceFormModal({ open, invoice, onClose, onSave }) {
         <FormSection icon={<Icon name="payment" />} title="معلومات الدفع">
           <FieldGrid cols={1}>
             <Field label="طريقة الدفع المفضلة">
-              <select
-                className="input"
+              <FilterSelect
                 value={form.paymentMethod}
-                onChange={set('paymentMethod')}
-              >
-                <option value="">غير محدد</option>
-                {paymentMethodOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+                onChange={(value) => set('paymentMethod')({ target: { value } })}
+                aria-label="طريقة الدفع المفضلة"
+                options={[
+                  { value: '', label: 'غير محدد' },
+                  ...paymentMethodOptions.map((opt) => ({
+                    value: opt.label,
+                    label: opt.label,
+                  })),
+                ]}
+              />
             </Field>
             <Field label="ملاحظات إضافية">
               <textarea

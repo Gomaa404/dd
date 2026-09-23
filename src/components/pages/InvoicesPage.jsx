@@ -1,24 +1,29 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { HiOutlineExclamationCircle, HiOutlineRefresh } from 'react-icons/hi'
 import { Icon } from '../ui/Icon'
+import { FilterSelect } from '../ui/FilterSelect'
 import { StatCard } from '../dashboard/StatCard'
 import { InvoiceFormModal } from '../invoices/InvoiceFormModal'
 import { InvoiceDetailsModal } from '../invoices/InvoiceDetailsModal'
 import { RecordPaymentModal } from '../invoices/RecordPaymentModal'
 import { useAuth } from '../../context/AuthContext'
-import { getLawyerInvoices } from '../../data/lawyerDashboard'
-import { getClientInvoices } from '../../data/clientDashboard'
 import {
-  initialInvoices,
+  useInvoices,
+  useInvoiceMutations,
+  useInvoiceDashboard,
+} from '../../hooks/useInvoices'
+import { getStoredCompanyId } from '../../api/client'
+import {
   invoiceStatusOptions,
-  createInvoiceFromForm,
-  invoiceCases,
-  invoiceClients,
   formatMoney,
   formatInvoiceDate,
   remaining,
-  deriveStatus,
+  deriveStatusValue,
+  buildInvoicePayload,
   calcInvoiceStats,
-} from '../../data/invoices'
+  mapInvoiceDashboardStats,
+  parseApiError,
+} from '../../api/invoices'
 
 function statusPill(status) {
   if (status === 'مدفوعة') return 'invoice-pill invoice-pill--paid'
@@ -71,25 +76,41 @@ export default function InvoicesPage() {
   const isLawyer = user?.roleId === 'lawyer'
   const isClient = user?.roleId === 'client'
   const isAdmin = !isLawyer && !isClient
-  const [invoices, setInvoices] = useState(initialInvoices)
+  const { invoices, isLoading, error, refetch, isFetching } = useInvoices()
+  const { data: dashRaw } = useInvoiceDashboard()
+  const { create, update, remove } = useInvoiceMutations()
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [detailsId, setDetailsId] = useState(null)
   const [paymentId, setPaymentId] = useState(null)
+  const [toast, setToast] = useState(null)
 
-  const scoped = useMemo(() => {
-    if (isLawyer) return getLawyerInvoices(user?.name, invoices)
-    if (isClient) return getClientInvoices(user?.name, invoices)
-    return invoices
-  }, [invoices, isLawyer, isClient, user?.name])
+  useEffect(() => {
+    if (!toast) return undefined
+    const id = window.setTimeout(() => setToast(null), 3200)
+    return () => window.clearTimeout(id)
+  }, [toast])
 
-  const stats = useMemo(() => calcInvoiceStats(scoped), [scoped])
+  const showToast = (text, tone = 'success') => setToast({ text, tone })
+
+  const stats = useMemo(() => {
+    const fromDash = mapInvoiceDashboardStats(dashRaw)
+    if (fromDash) return fromDash
+    return calcInvoiceStats(invoices)
+  }, [dashRaw, invoices])
+
+  const hasActiveFilters = Boolean(query.trim() || statusFilter)
+
+  const clearFilters = () => {
+    setQuery('')
+    setStatusFilter('')
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return scoped.filter((inv) => {
+    return invoices.filter((inv) => {
       if (statusFilter && inv.status !== statusFilter) return false
       if (!q) return true
       return [inv.number, inv.clientName, inv.caseTitle, inv.description, inv.status]
@@ -97,7 +118,7 @@ export default function InvoicesPage() {
         .toLowerCase()
         .includes(q)
     })
-  }, [scoped, query, statusFilter])
+  }, [invoices, query, statusFilter])
 
   const editingInvoice = invoices.find((item) => item.id === editingId) || null
   const detailsInvoice = invoices.find((item) => item.id === detailsId) || null
@@ -108,64 +129,68 @@ export default function InvoicesPage() {
     setFormOpen(true)
   }
 
-  const handleSave = (form) => {
-    if (editingId) {
-      const client = invoiceClients.find((item) => item.id === form.clientId)
-      const linkedCase = invoiceCases.find((item) => item.id === form.caseId)
-      const total = Number(form.total) || 0
-      const paid = Number(form.paid) || 0
-      setInvoices((prev) =>
-        prev.map((item) =>
-          item.id === editingId
-            ? {
-                ...item,
-                number: form.number,
-                issueDate: form.issueDate,
-                dueDate: form.dueDate,
-                clientId: client?.id || '',
-                clientName: client?.name || item.clientName,
-                caseId: linkedCase?.id || '',
-                caseTitle: linkedCase?.title || '',
-                description: form.description.trim(),
-                total,
-                paid,
-                status: form.status || deriveStatus(total, paid),
-                items: form.items || [],
-                paymentMethod: form.paymentMethod || '',
-                notes: form.notes?.trim() || '',
-              }
-            : item,
-        ),
-      )
-      return
+  const handleSave = async (form) => {
+    const companyId = getStoredCompanyId()
+    const payload = buildInvoicePayload(form, { companyId })
+    try {
+      if (editingId) {
+        await update.mutateAsync({ id: editingId, values: payload })
+        showToast('تم تحديث الفاتورة')
+      } else {
+        await create.mutateAsync(payload)
+        showToast('تم إضافة الفاتورة')
+      }
+      setFormOpen(false)
+      setEditingId(null)
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error')
+      throw err
     }
-    setInvoices((prev) => [createInvoiceFromForm(form), ...prev])
   }
 
-  const handleAddPayment = (id, payment) => {
-    setInvoices((prev) =>
-      prev.map((item) => {
-        if (item.id !== id) return item
-        const paid = (Number(item.paid) || 0) + payment.amount
-        return {
-          ...item,
-          paid,
-          status: deriveStatus(item.total, paid),
-          payments: [...(item.payments || []), payment],
-        }
-      }),
-    )
+  const handleAddPayment = async (id, payment) => {
+    const invoice = invoices.find((item) => item.id === id)
+    if (!invoice) return
+    const newPaid = (Number(invoice.paid) || 0) + (Number(payment.amount) || 0)
+    const total = Number(invoice.total) || 0
+    try {
+      await update.mutateAsync({
+        id,
+        values: {
+          paid_amount: newPaid,
+          status: deriveStatusValue(total, newPaid),
+        },
+      })
+      showToast('تم تسجيل الدفعة')
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error')
+      throw err
+    }
   }
 
-  const handleDelete = (id) => {
-    setInvoices((prev) => prev.filter((item) => item.id !== id))
-    if (detailsId === id) setDetailsId(null)
-    if (editingId === id) setEditingId(null)
-    if (paymentId === id) setPaymentId(null)
+  const handleDelete = async (id) => {
+    try {
+      await remove.mutateAsync(id)
+      if (detailsId === id) setDetailsId(null)
+      if (editingId === id) setEditingId(null)
+      if (paymentId === id) setPaymentId(null)
+      showToast('تم حذف الفاتورة')
+    } catch (err) {
+      showToast(parseApiError(err).message, 'error')
+    }
   }
 
   return (
     <div className="invoices-page">
+      {toast ? (
+        <div
+          className={`toast toast--${toast.tone === 'error' ? 'error' : 'success'}`}
+          role="status"
+        >
+          {toast.text}
+        </div>
+      ) : null}
+
       <div className="stats-grid">
         <StatCard value={formatMoney(stats.total)} label="إجمالي الفواتير" tone="gold" icon="invoices" index={0} />
         <StatCard value={formatMoney(stats.collected)} label="المحصّل" tone="success" icon="check" index={1} />
@@ -173,10 +198,24 @@ export default function InvoicesPage() {
         <StatCard value={stats.overdue} label="فواتير متأخرة السداد" tone="muted" icon="alert" index={3} />
       </div>
 
-      <div className="cases-toolbar">
+      <div className="cases-toolbar invoices-toolbar">
         <h2 className="cases-toolbar__title">الفواتير والمدفوعات</h2>
-        <div className="cases-toolbar__actions">
-          <div className="search-field">
+        <div className="cases-toolbar__actions invoices-toolbar__actions">
+          <button
+            type="button"
+            className="btn btn--ghost inline-flex items-center gap-2"
+            onClick={() => refetch()}
+            disabled={isLoading || isFetching}
+            title="تحديث"
+          >
+            <HiOutlineRefresh
+              size={18}
+              className={isFetching ? 'animate-spin' : undefined}
+              aria-hidden
+            />
+            تحديث
+          </button>
+          <div className="search-field invoices-toolbar__search">
             <Icon name="search" className="search-field__icon" />
             <input
               className="search-field__input"
@@ -184,21 +223,27 @@ export default function InvoicesPage() {
               placeholder="بحث في الفواتير..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              aria-label="بحث في الفواتير"
             />
           </div>
-          <select
-            className="filter-select"
+          <FilterSelect
+            className="invoices-toolbar__filter"
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={setStatusFilter}
             aria-label="تصفية حسب الحالة"
-          >
-            <option value="">كل الفواتير</option>
-            {invoiceStatusOptions.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: '', label: 'كل الفواتير' },
+              ...invoiceStatusOptions.map((opt) => ({
+                value: opt.label,
+                label: opt.label,
+              })),
+            ]}
+          />
+          {hasActiveFilters ? (
+            <button type="button" className="btn btn--ghost" onClick={clearFilters}>
+              مسح الفلاتر
+            </button>
+          ) : null}
           {isAdmin && (
             <button type="button" className="btn btn--primary" onClick={openAdd}>
               <Icon name="plus" size={18} />
@@ -208,111 +253,140 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      <div className="table-card">
-        <div className="table-wrap">
-          <table className="data-table invoices-table">
-            <thead>
-              <tr>
-                <th>رقم الفاتورة</th>
-                <th>القضية/الموكل</th>
-                <th>الوصف</th>
-                <th>المبلغ</th>
-                <th>المدفوع</th>
-                <th>المتبقي</th>
-                <th>تاريخ الاستحقاق</th>
-                <th>الحالة</th>
-                <th>الإجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
+      {isLoading ? (
+        <div className="table-card flex flex-col items-center gap-4 px-6 py-12 text-center">
+          <HiOutlineRefresh size={28} className="animate-spin text-gold" aria-hidden />
+          <p>جاري تحميل الفواتير...</p>
+        </div>
+      ) : null}
+
+      {!isLoading && error ? (
+        <div className="table-card flex flex-col items-center gap-4 px-6 py-12 text-center">
+          <span className="grid size-14 place-items-center rounded-2xl bg-rose-50 text-rose-600">
+            <HiOutlineExclamationCircle size={28} aria-hidden />
+          </span>
+          <div>
+            <p className="font-display text-base font-bold text-brand">تعذر تحميل الفواتير</p>
+            <p className="mt-1 text-sm text-[#6b7f80]">{error}</p>
+          </div>
+          <button
+            type="button"
+            className="btn btn--primary inline-flex items-center gap-2"
+            onClick={() => refetch()}
+          >
+            <HiOutlineRefresh size={18} aria-hidden />
+            إعادة المحاولة
+          </button>
+        </div>
+      ) : null}
+
+      {!isLoading && !error ? (
+        <div className="table-card">
+          <div className="table-wrap">
+            <table className="data-table invoices-table">
+              <thead>
                 <tr>
-                  <td colSpan={9} className="data-table__empty">
-                    لا توجد فواتير
-                  </td>
+                  <th>رقم الفاتورة</th>
+                  <th>القضية/الموكل</th>
+                  <th>الوصف</th>
+                  <th>المبلغ</th>
+                  <th>المدفوع</th>
+                  <th>المتبقي</th>
+                  <th>تاريخ الاستحقاق</th>
+                  <th>الحالة</th>
+                  <th>الإجراءات</th>
                 </tr>
-              ) : (
-                filtered.map((inv) => {
-                  const due = remaining(inv)
-                  const isPayable = due > 0 && inv.status !== 'ملغاة'
-                  return (
-                    <tr key={inv.id}>
-                      <td className="invoices-table__num">{inv.number}</td>
-                      <td>
-                        <div className="invoice-party">
-                          <strong>{inv.clientName || '—'}</strong>
-                          {inv.caseTitle ? <small>{inv.caseTitle}</small> : null}
-                        </div>
-                      </td>
-                      <td>{inv.description || '—'}</td>
-                      <td>{formatMoney(inv.total)}</td>
-                      <td className="invoices-table__paid">{formatMoney(inv.paid)}</td>
-                      <td className="invoices-table__due">{formatMoney(due)}</td>
-                      <td>{formatInvoiceDate(inv.dueDate)}</td>
-                      <td>
-                        <span className={statusPill(inv.status)}>{inv.status}</span>
-                      </td>
-                      <td>
-                        <div className="row-actions">
-                          {isPayable && !isClient ? (
+              </thead>
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="data-table__empty">
+                      لا توجد فواتير
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((inv) => {
+                    const due = remaining(inv)
+                    const isPayable = due > 0 && inv.status !== 'ملغاة'
+                    return (
+                      <tr key={inv.id}>
+                        <td className="invoices-table__num">{inv.number}</td>
+                        <td>
+                          <div className="invoice-party">
+                            <strong>{inv.clientName || '—'}</strong>
+                            {inv.caseTitle ? <small>{inv.caseTitle}</small> : null}
+                          </div>
+                        </td>
+                        <td>{inv.description || '—'}</td>
+                        <td>{formatMoney(inv.total)}</td>
+                        <td className="invoices-table__paid">{formatMoney(inv.paid)}</td>
+                        <td className="invoices-table__due">{formatMoney(due)}</td>
+                        <td>{formatInvoiceDate(inv.dueDate)}</td>
+                        <td>
+                          <span className={statusPill(inv.status)}>{inv.status}</span>
+                        </td>
+                        <td>
+                          <div className="row-actions">
+                            {isPayable && !isClient ? (
+                              <button
+                                type="button"
+                                className="action-btn action-btn--pay"
+                                title="تسجيل دفعة"
+                                onClick={() => setPaymentId(inv.id)}
+                              >
+                                <Icon name="cash" size={16} />
+                              </button>
+                            ) : null}
                             <button
                               type="button"
-                              className="action-btn action-btn--pay"
-                              title="تسجيل دفعة"
-                              onClick={() => setPaymentId(inv.id)}
+                              className="action-btn action-btn--view"
+                              title="عرض التفاصيل"
+                              onClick={() => setDetailsId(inv.id)}
                             >
-                              <Icon name="cash" size={16} />
+                              <Icon name="eye" size={16} />
                             </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="action-btn action-btn--view"
-                            title="عرض التفاصيل"
-                            onClick={() => setDetailsId(inv.id)}
-                          >
-                            <Icon name="eye" size={16} />
-                          </button>
-                          <button
-                            type="button"
-                            className="action-btn action-btn--print"
-                            title="طباعة"
-                            onClick={() => printInvoice(inv)}
-                          >
-                            <Icon name="print" size={16} />
-                          </button>
-                          {isAdmin && (
-                            <>
-                              <button
-                                type="button"
-                                className="action-btn action-btn--edit"
-                                title="تعديل"
-                                onClick={() => {
-                                  setEditingId(inv.id)
-                                  setFormOpen(true)
-                                }}
-                              >
-                                <Icon name="edit" size={16} />
-                              </button>
-                              <button
-                                type="button"
-                                className="action-btn action-btn--delete"
-                                title="حذف"
-                                onClick={() => handleDelete(inv.id)}
-                              >
-                                <Icon name="trash" size={16} />
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
+                            <button
+                              type="button"
+                              className="action-btn action-btn--print"
+                              title="طباعة"
+                              onClick={() => printInvoice(inv)}
+                            >
+                              <Icon name="print" size={16} />
+                            </button>
+                            {isAdmin && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="action-btn action-btn--edit"
+                                  title="تعديل"
+                                  onClick={() => {
+                                    setEditingId(inv.id)
+                                    setFormOpen(true)
+                                  }}
+                                >
+                                  <Icon name="edit" size={16} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="action-btn action-btn--delete"
+                                  title="حذف"
+                                  onClick={() => handleDelete(inv.id)}
+                                >
+                                  <Icon name="trash" size={16} />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <InvoiceFormModal
         open={formOpen}

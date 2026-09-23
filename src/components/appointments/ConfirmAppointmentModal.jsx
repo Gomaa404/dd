@@ -1,6 +1,6 @@
 import { Modal } from '../ui/Modal'
 import { Icon } from '../ui/Icon'
-import { formatAppointmentDate } from '../../data/appointments'
+import { formatDisplayDate } from '../../utils/formatDisplay'
 
 export function ConfirmAppointmentModal({ open, appointment, onClose, onConfirm }) {
   if (!appointment) return null
@@ -36,7 +36,7 @@ export function ConfirmAppointmentModal({ open, appointment, onClose, onConfirm 
         <h3>هل تريد تأكيد هذا الموعد؟</h3>
         <p>
           موعد <strong>{appointment.clientName}</strong> يوم{' '}
-          <strong>{formatAppointmentDate(appointment.date)}</strong> الساعة{' '}
+          <strong>{formatDisplayDate(appointment.date)}</strong> الساعة{' '}
           <strong>{appointment.time}</strong>.
         </p>
         {appointment.status === 'مؤكد' ? (

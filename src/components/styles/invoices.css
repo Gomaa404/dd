@@ -4,6 +4,51 @@
   gap: 1rem;
 }
 
+.invoices-toolbar {
+  align-items: flex-start;
+}
+
+.invoices-toolbar__actions {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  max-width: 100%;
+}
+
+.invoices-toolbar__search {
+  width: min(260px, 100%);
+  flex: 0 1 260px;
+}
+
+.invoices-toolbar__search .search-field__input {
+  width: 100%;
+}
+
+.invoices-toolbar__filter.filter-dropdown,
+.invoices-toolbar .filter-dropdown {
+  width: 168px;
+  min-width: 168px;
+  max-width: 168px;
+  flex: 0 0 168px;
+}
+
+@media (max-width: 720px) {
+  .invoices-toolbar__actions {
+    justify-content: stretch;
+  }
+
+  .invoices-toolbar__search {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .invoices-toolbar__filter.filter-dropdown,
+  .invoices-toolbar .filter-dropdown {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: 100%;
+  }
+}
+
 /* Status pills */
 .invoice-pill {
   display: inline-flex;
@@ -62,16 +107,6 @@
 
 .invoice-party small {
   color: var(--text-muted);
-}
-
-.action-btn--pay {
-  background: linear-gradient(145deg, #4caf7a, #2d8a5e);
-  box-shadow: 0 4px 12px rgba(45, 138, 94, 0.3);
-}
-
-.action-btn--print {
-  background: linear-gradient(145deg, #4d8fd4, #3a6ea5);
-  box-shadow: 0 4px 12px rgba(58, 110, 165, 0.3);
 }
 
 /* Form pieces */

@@ -15,7 +15,7 @@ const emptyRegister = {
 }
 
 export default function AuthPage() {
-  const { isAuthenticated, login, register, toast } = useAuth()
+  const { isAuthenticated, login, register, registering, toast } = useAuth()
   const navigate = useNavigate()
   const [mode, setMode]               = useState('login')
   const [role, setRole]               = useState('client')
@@ -37,9 +37,10 @@ export default function AuthPage() {
     if (ok) navigate('/', { replace: true })
   }
 
-  const handleRegister = (e) => {
+  const handleRegister = async (e) => {
     e.preventDefault()
-    const ok = register({ ...registerForm, role })
+    if (registering) return
+    const ok = await register({ ...registerForm, role })
     if (ok) navigate('/', { replace: true })
   }
 
@@ -165,8 +166,9 @@ export default function AuthPage() {
                     <input type="text" value={registerForm.address}
                       onChange={(e) => setRegisterForm((p) => ({ ...p, address: e.target.value }))} />
                   </label>
-                  <button type="submit" className="auth-submit">
-                    إنشاء الحساب <Icon name="plus" size={18} />
+                  <button type="submit" className="auth-submit" disabled={registering} aria-busy={registering}>
+                    {registering ? 'جاري إنشاء الحساب...' : 'إنشاء الحساب'}
+                    {!registering ? <Icon name="plus" size={18} /> : null}
                   </button>
                 </motion.form>
               )}

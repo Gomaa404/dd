@@ -27,6 +27,11 @@
 
 .appointments-filters__grid > label {
   min-width: 0;
+  overflow: visible;
+}
+
+.appointments-filters {
+  overflow: visible;
 }
 
 .appointments-filters__grid > label > span {
@@ -109,16 +114,6 @@
 .appointment-status--cancelled {
   color: #b43d3d;
   background: linear-gradient(135deg, #ffeded, #fbd8d8);
-}
-
-.action-btn--confirm {
-  background: linear-gradient(145deg, #4caf7a, #2d8a5e);
-  box-shadow: 0 4px 12px rgba(45, 138, 94, 0.3);
-}
-
-.action-btn--assign {
-  background: linear-gradient(145deg, #2e9db0, #23798a);
-  box-shadow: 0 4px 12px rgba(35, 121, 138, 0.3);
 }
 
 .appointment-form {

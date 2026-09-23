@@ -1,32 +1,57 @@
+import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Icon } from '../ui/Icon'
 import { useAuth } from '../../context/AuthContext'
-import { currentUser as fallbackUser } from '../../data/dashboard'
-import { getClientInvoices } from '../../data/clientDashboard'
-import { remaining, formatMoney } from '../../data/invoices'
+import { isSamePerson } from '../../data/roles'
+import { remaining, formatMoney } from '../../api/invoices'
+import { useInvoices } from '../../hooks/useInvoices'
+import { useClients } from '../../hooks/useClients'
 
 function display(value) {
   if (value === 0) return '0'
   return value || '—'
 }
 
+function initialsFromName(name) {
+  if (!name) return '—'
+  return String(name)
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+}
+
 export default function ProfilePage() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const { invoices } = useInvoices()
+  const { clients } = useClients()
 
-  const balance =
-    user?.roleId === 'client'
-      ? getClientInvoices(user?.name).reduce((sum, inv) => sum + remaining(inv), 0)
-      : fallbackUser.balance
+  const matchedClient = useMemo(
+    () => clients.find((c) => isSamePerson(c.name, user?.name)) ?? null,
+    [clients, user?.name],
+  )
+
+  const balance = useMemo(() => {
+    if (user?.roleId !== 'client') return null
+    const clientId = matchedClient?.id != null ? String(matchedClient.id) : null
+    const scoped = invoices.filter((inv) => {
+      if (clientId && inv.clientId) return inv.clientId === clientId
+      return isSamePerson(inv.clientName, user?.name)
+    })
+    return scoped.reduce((sum, inv) => sum + remaining(inv), 0)
+  }, [invoices, matchedClient, user?.name, user?.roleId])
 
   const profile = {
-    ...fallbackUser,
-    ...user,
-    type: user?.role || fallbackUser.type,
+    name: user?.name ?? '—',
+    email: user?.email ?? '—',
+    role: user?.role ?? '—',
+    type: user?.role ?? '—',
     status: user?.status || 'نشط',
-    phone: user?.phone || fallbackUser.phone,
-    address: user?.address || '',
-    nationalId: user?.nationalId || '',
+    phone: user?.phone || matchedClient?.phone || '—',
+    address: user?.address || matchedClient?.address || '',
+    nationalId: user?.nationalId || matchedClient?.nationalId || '',
+    initials: user?.initials || initialsFromName(user?.name),
     balance,
   }
 
@@ -43,7 +68,7 @@ export default function ProfilePage() {
       value:
         typeof profile.balance === 'number'
           ? formatMoney(profile.balance)
-          : `${display(profile.balance)} ج.م`,
+          : '—',
     },
   ]
 

@@ -5,7 +5,9 @@ import { RoleRoute } from './RoleRoute'
 import DashboardPage from './pages/DashboardPage'
 import CasesPage from './pages/CasesPage'
 import ClientsPage from './pages/ClientsPage'
+import ClientDetailPage from './pages/ClientDetailPage'
 import LawyersPage from './pages/LawyersPage'
+import LawyerDetailPage from './pages/LawyerDetailPage'
 import DocumentsPage from './pages/DocumentsPage'
 import AppointmentsPage from './pages/AppointmentsPage'
 import SessionsPage from './pages/SessionsPage'
@@ -38,9 +40,11 @@ export function AppRoutes() {
           <Route path="documents" element={<DocumentsPage />} />
           <Route element={<RoleRoute navId="lawyers" />}>
             <Route path="lawyers" element={<LawyersPage />} />
+            <Route path="lawyers/:id" element={<LawyerDetailPage />} />
           </Route>
           <Route element={<RoleRoute navId="clients" />}>
             <Route path="clients" element={<ClientsPage />} />
+            <Route path="clients/:id" element={<ClientDetailPage />} />
           </Route>
           <Route path="invoices" element={<InvoicesPage />} />
           <Route path="profile" element={<ProfilePage />} />

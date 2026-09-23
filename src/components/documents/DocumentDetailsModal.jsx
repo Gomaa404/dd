@@ -1,6 +1,6 @@
 import { Modal } from '../ui/Modal'
 import { Icon } from '../ui/Icon'
-import { formatFileSize } from '../../data/documents'
+import { formatFileSize } from '../../utils/formatDisplay'
 
 function display(value) {
   if (value === 0) return '0'

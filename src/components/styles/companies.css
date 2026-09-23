@@ -10,15 +10,6 @@
   min-width: 11rem;
 }
 
-.action-btn--delete {
-  color: #c44545;
-}
-
-.action-btn--delete:hover {
-  background: #fdeeee;
-  color: #8a2b2b;
-}
-
 @media (max-width: 900px) {
   .data-table--companies th:nth-child(4),
   .data-table--companies td:nth-child(4) {

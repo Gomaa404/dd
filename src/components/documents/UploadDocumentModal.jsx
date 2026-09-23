@@ -2,20 +2,18 @@ import { useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { FormSection, Field, FieldGrid } from '../ui/Form'
 import { Icon } from '../ui/Icon'
-import {
-  emptyDocumentForm,
-  documentTypeOptions,
-  documentCaseOptions,
-} from '../../data/documents'
+import { FilterSelect } from '../ui/FilterSelect'
+import { emptyDocumentForm, documentTypeOptions } from '../../api/documents'
 
 export function UploadDocumentModal({
   open,
   onClose,
   onSave,
-  caseOptions = documentCaseOptions,
+  caseOptions = [],
 }) {
   const [form, setForm] = useState(emptyDocumentForm)
   const [fileLabel, setFileLabel] = useState('لم يتم اختيار ملف')
+  const [submitting, setSubmitting] = useState(false)
 
   const set = (key) => (e) => {
     setForm((prev) => ({ ...prev, [key]: e.target.value }))
@@ -27,13 +25,20 @@ export function UploadDocumentModal({
     onClose()
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!form.fileName || !form.description.trim()) return
-    onSave(form)
-    setForm(emptyDocumentForm)
-    setFileLabel('لم يتم اختيار ملف')
-    onClose()
+    if (!form.fileName || !form.description.trim() || !form.file) return
+    setSubmitting(true)
+    try {
+      await onSave?.(form)
+      setForm(emptyDocumentForm)
+      setFileLabel('لم يتم اختيار ملف')
+      onClose()
+    } catch {
+      /* parent surfaces error */
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -44,7 +49,12 @@ export function UploadDocumentModal({
       wide
       footer={
         <>
-          <button type="submit" form="docs-upload-form" className="btn btn--primary">
+          <button
+            type="submit"
+            form="docs-upload-form"
+            className="btn btn--primary"
+            disabled={submitting}
+          >
             <Icon name="upload" size={18} />
             رفع المستند
           </button>
@@ -71,6 +81,7 @@ export function UploadDocumentModal({
                       setFileLabel(file ? file.name : 'لم يتم اختيار ملف')
                       setForm((prev) => ({
                         ...prev,
+                        file: file || null,
                         fileName: file?.name || '',
                         sizeBytes: file?.size || 0,
                         mimeType: file?.type || '',
@@ -102,24 +113,29 @@ export function UploadDocumentModal({
         <FormSection icon={<Icon name="link" />} title="ربط بقضية">
           <FieldGrid cols={1}>
             <Field label="القضية المرتبطة">
-              <select className="input" value={form.caseId} onChange={set('caseId')}>
-                <option value="">-- بدون قضية (اختياري) --</option>
-                {caseOptions.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.title} (#{item.number})
-                  </option>
-                ))}
-              </select>
+              <FilterSelect
+                value={form.caseId}
+                onChange={(value) => set('caseId')({ target: { value } })}
+                aria-label="القضية المرتبطة"
+                options={[
+                  { value: '', label: '-- بدون قضية (اختياري) --' },
+                  ...caseOptions.map((item) => ({
+                    value: String(item.id),
+                    label: `${item.title} (#${item.number})`,
+                  })),
+                ]}
+              />
             </Field>
             <Field label="نوع المستند">
-              <select className="input" value={form.docType} onChange={set('docType')}>
-                <option value="">-- اختر النوع --</option>
-                {documentTypeOptions.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+              <FilterSelect
+                value={form.docType}
+                onChange={(value) => set('docType')({ target: { value } })}
+                aria-label="نوع المستند"
+                options={[
+                  { value: '', label: '-- اختر النوع --' },
+                  ...documentTypeOptions.map((opt) => ({ value: opt, label: opt })),
+                ]}
+              />
             </Field>
           </FieldGrid>
         </FormSection>

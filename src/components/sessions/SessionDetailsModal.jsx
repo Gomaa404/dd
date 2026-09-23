@@ -1,6 +1,6 @@
 import { Modal } from '../ui/Modal'
 import { Icon } from '../ui/Icon'
-import { formatSessionDate } from '../../data/sessions'
+import { formatDisplayDate } from '../../utils/formatDisplay'
 
 function statusClass(status) {
   if (status === 'مجدولة') return 'session-status session-status--scheduled'
@@ -42,7 +42,7 @@ export function SessionDetailsModal({ open, session, onClose }) {
             </div>
             <div>
               <dt>التاريخ</dt>
-              <dd>{formatSessionDate(session.date)}</dd>
+              <dd>{formatDisplayDate(session.date)}</dd>
             </div>
             <div>
               <dt>الوقت</dt>

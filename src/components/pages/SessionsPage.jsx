@@ -1,23 +1,28 @@
 import { useMemo, useState } from 'react'
+import { HiOutlineExclamationCircle, HiOutlineRefresh } from 'react-icons/hi'
 import { Icon } from '../ui/Icon'
+import { FilterSelect } from '../ui/FilterSelect'
+import { DateField } from '../ui/DateField'
 import { StatCard } from '../dashboard/StatCard'
 import { SessionFormModal } from '../sessions/SessionFormModal'
 import { SessionDetailsModal } from '../sessions/SessionDetailsModal'
 import { PostponeSessionModal } from '../sessions/PostponeSessionModal'
 import { useAuth } from '../../context/AuthContext'
 import { isSamePerson } from '../../data/roles'
-import { getLawyerSessions } from '../../data/lawyerDashboard'
-import { getClientSessions, getClientCases } from '../../data/clientDashboard'
+import { getStoredCompanyId } from '../../api/client'
 import {
-  initialSessions,
-  sessionTypeOptions,
-  sessionStatusOptions,
-  sessionCaseOptions,
-  sessionLawyerOptions,
-  createSessionFromForm,
-  formatSessionDate,
+  buildSessionPayload,
   calcSessionStats,
-} from '../../data/sessions'
+  parseApiError,
+  sessionStatusOptions,
+  sessionToForm,
+  sessionTypeOptions,
+} from '../../api/sessions'
+import { formatDisplayDate } from '../../utils/formatDisplay'
+import { isValidDateOrder, MSG } from '../../utils/validation'
+import { useSessions, useSessionKpis, useSessionMutations } from '../../hooks/useSessions'
+import { useCases } from '../../hooks/useCases'
+import { useLawyers } from '../../hooks/useLawyers'
 
 const WEEKDAYS = ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة']
 
@@ -41,7 +46,6 @@ function buildCalendarDays(monthDate) {
   const first = startOfMonth(monthDate)
   const year = first.getFullYear()
   const month = first.getMonth()
-  // Saturday-first calendar: JS getDay() Sun=0 ... Sat=6 → shift
   const startOffset = (first.getDay() + 1) % 7
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const cells = []
@@ -60,12 +64,22 @@ function toKey(date) {
   return `${y}-${m}-${d}`
 }
 
+function caseClientName(caseItem) {
+  return caseItem?.client?.full_name ?? caseItem?.client?.user?.full_name ?? caseItem?.client?.name ?? ''
+}
+
 export default function SessionsPage() {
   const { user } = useAuth()
   const isLawyer = user?.roleId === 'lawyer'
   const isClient = user?.roleId === 'client'
   const isAdmin = !isLawyer && !isClient
-  const [sessions, setSessions] = useState(initialSessions)
+
+  const { sessions, isLoading, isFetching, error, refetch } = useSessions()
+  const { cases } = useCases()
+  const { lawyers } = useLawyers()
+  const { data: kpiData } = useSessionKpis()
+  const { create, update, remove } = useSessionMutations()
+
   const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -80,31 +94,85 @@ export default function SessionsPage() {
   const [postponeId, setPostponeId] = useState(null)
   const [calendarMonth, setCalendarMonth] = useState(() => new Date())
 
-  const caseOptionsForFilter = useMemo(() => {
-    if (isClient) {
-      return getClientCases(user?.name).map(({ id, title, number }) => ({
-        id,
-        title,
-        number,
-      }))
-    }
-    if (isLawyer) {
-      const ids = new Set(
-        getLawyerSessions(user?.name, sessions).map((item) => item.caseId),
-      )
-      return sessionCaseOptions.filter((item) => ids.has(item.id))
-    }
-    return sessionCaseOptions
-  }, [isClient, isLawyer, user?.name, sessions])
+  const lawyerOptions = useMemo(
+    () => lawyers.map((item) => ({ id: String(item.id), name: item.name })),
+    [lawyers],
+  )
+
+  const allCaseOptions = useMemo(
+    () =>
+      cases.map((item) => ({
+        id: String(item.id),
+        title: item.title,
+        number: item.case_number || item.number || '',
+      })),
+    [cases],
+  )
+
+  const clientCaseIds = useMemo(() => {
+    if (!isClient) return null
+    return new Set(
+      cases
+        .filter((item) => isSamePerson(caseClientName(item), user?.name))
+        .map((item) => String(item.id)),
+    )
+  }, [cases, isClient, user?.name])
 
   const scopedSessions = useMemo(() => {
-    if (isLawyer) return getLawyerSessions(user?.name, sessions)
-    if (isClient) return getClientSessions(user?.name, sessions)
+    if (isLawyer) {
+      const selfLawyer = lawyers.find((item) => isSamePerson(item.name, user?.name))
+      const selfLawyerId = selfLawyer ? String(selfLawyer.id) : ''
+      if (selfLawyerId) {
+        return sessions.filter(
+          (item) =>
+            String(item.lawyerId) === selfLawyerId ||
+            isSamePerson(item.lawyerName, user?.name),
+        )
+      }
+      return sessions.filter((item) => isSamePerson(item.lawyerName, user?.name))
+    }
+    if (isClient && clientCaseIds) {
+      return sessions.filter((item) => clientCaseIds.has(String(item.caseId)))
+    }
     return sessions
-  }, [sessions, isLawyer, isClient, user?.name])
+  }, [sessions, isLawyer, isClient, user?.name, lawyers, clientCaseIds])
 
-  const stats = useMemo(() => calcSessionStats(scopedSessions), [scopedSessions])
+  const caseOptionsForFilter = useMemo(() => {
+    if (isClient) {
+      return allCaseOptions.filter((item) => clientCaseIds?.has(item.id))
+    }
+    if (isLawyer) {
+      const ids = new Set(scopedSessions.map((item) => String(item.caseId)))
+      return allCaseOptions.filter((item) => ids.has(item.id))
+    }
+    return allCaseOptions
+  }, [allCaseOptions, isClient, isLawyer, clientCaseIds, scopedSessions])
+
+  const stats = useMemo(() => {
+    if (kpiData && typeof kpiData === 'object') {
+      const hasMetrics =
+        'total' in kpiData ||
+        'upcoming' in kpiData ||
+        'today' in kpiData ||
+        'postponed' in kpiData
+      if (hasMetrics) {
+        return {
+          total: kpiData.total ?? 0,
+          upcoming: kpiData.upcoming ?? 0,
+          today: kpiData.today ?? 0,
+          postponed: kpiData.postponed ?? 0,
+        }
+      }
+    }
+    return calcSessionStats(scopedSessions)
+  }, [kpiData, scopedSessions])
+
   const todayKey = useMemo(() => new Date().toISOString().slice(0, 10), [])
+
+  const dateRangeInvalid = useMemo(
+    () => Boolean(dateFrom && dateTo && !isValidDateOrder(dateFrom, dateTo)),
+    [dateFrom, dateTo],
+  )
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -123,12 +191,14 @@ export default function SessionsPage() {
       }
       if (typeFilter && item.type !== typeFilter) return false
       if (statusFilter && item.status !== statusFilter) return false
-      if (caseFilter && item.caseId !== caseFilter) return false
+      if (caseFilter && String(item.caseId) !== caseFilter) return false
       if (isAdmin) {
-        if (lawyerFilter && item.lawyerId !== lawyerFilter) return false
+        if (lawyerFilter && String(item.lawyerId) !== lawyerFilter) return false
       }
-      if (dateFrom && item.date < dateFrom) return false
-      if (dateTo && item.date > dateTo) return false
+      if (!dateRangeInvalid) {
+        if (dateFrom && item.date < dateFrom) return false
+        if (dateTo && item.date > dateTo) return false
+      }
       if (!q) return true
       return [
         item.sessionNumber,
@@ -153,14 +223,15 @@ export default function SessionsPage() {
     lawyerFilter,
     dateFrom,
     dateTo,
+    dateRangeInvalid,
     quickFilter,
     todayKey,
     isAdmin,
   ])
 
-  const editingSession = sessions.find((item) => item.id === editingId) || null
-  const detailsSession = sessions.find((item) => item.id === detailsId) || null
-  const postponeSession = sessions.find((item) => item.id === postponeId) || null
+  const editingSession = sessions.find((item) => String(item.id) === String(editingId)) || null
+  const detailsSession = sessions.find((item) => String(item.id) === String(detailsId)) || null
+  const postponeSession = sessions.find((item) => String(item.id) === String(postponeId)) || null
 
   const sessionsByDay = useMemo(() => {
     const map = {}
@@ -194,96 +265,56 @@ export default function SessionsPage() {
     setFormOpen(true)
   }
 
-  const handleSave = (form) => {
-    const linkedCase =
-      caseOptionsForFilter.find((item) => item.id === form.caseId) ||
-      sessionCaseOptions.find((item) => item.id === form.caseId)
-
-    let lawyerOption = isLawyer
-      ? sessionLawyerOptions.find((item) => isSamePerson(item.name, user?.name)) || {
-          id: '',
-          name: user?.name || '',
-        }
-      : sessionLawyerOptions.find((item) => item.id === form.lawyerId)
-
-    if (isClient && !lawyerOption) {
-      const caseRow = getClientCases(user?.name).find((item) => item.id === form.caseId)
-      lawyerOption = sessionLawyerOptions.find((item) =>
-        isSamePerson(item.name, caseRow?.lawyer),
-      ) || {
-        id: '',
-        name: caseRow?.lawyer || '',
+  const handleSave = async (form) => {
+    const companyId = getStoredCompanyId()
+    const payload = buildSessionPayload(form, { companyId })
+    try {
+      if (editingId) {
+        await update.mutateAsync({ id: editingId, values: payload })
+      } else {
+        await create.mutateAsync(payload)
       }
+      await refetch()
+    } catch (err) {
+      throw new Error(parseApiError(err).message)
     }
+  }
 
-    const payload = {
-      ...form,
-      lawyerId: lawyerOption?.id || form.lawyerId || '',
-    }
-
-    if (editingId) {
-      setSessions((prev) =>
-        prev.map((item) =>
-          item.id === editingId
-            ? {
-                ...item,
-                sessionNumber: form.sessionNumber || item.sessionNumber,
-                caseId: linkedCase?.id || '',
-                caseTitle: linkedCase?.title || '',
-                caseNumber: linkedCase?.number || '',
-                court: form.court.trim(),
-                circuit: form.circuit.trim(),
-                judge: form.judge.trim(),
-                hall: form.hall.trim(),
-                courtAddress: form.courtAddress.trim(),
-                date: form.date,
-                time: form.time,
-                type: form.type,
-                decision: form.decision,
-                status: form.status,
-                importance: form.importance,
-                notes: form.notes.trim(),
-                lawyerId: lawyerOption?.id || item.lawyerId,
-                lawyerName: lawyerOption?.name || user?.name || item.lawyerName,
-              }
-            : item,
-        ),
-      )
-      return
-    }
-
-    const created = createSessionFromForm(payload, sessions)
-    setSessions((prev) => [
+  const handlePostpone = async (id, { date, reason }) => {
+    const session = sessions.find((item) => String(item.id) === String(id))
+    if (!session) return
+    const base = sessionToForm(session)
+    const notes = reason
+      ? [base.notes, `سبب التأجيل: ${reason}`].filter(Boolean).join('\n')
+      : base.notes
+    const payload = buildSessionPayload(
       {
-        ...created,
-        lawyerId: lawyerOption?.id || created.lawyerId,
-        lawyerName: lawyerOption?.name || user?.name || created.lawyerName,
+        ...base,
+        date,
+        status: 'مؤجلة',
+        decision: 'تأجيل',
+        notes,
       },
-      ...prev,
-    ])
-  }
-
-  const handlePostpone = (id, { date, reason }) => {
-    setSessions((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              date,
-              status: 'مؤجلة',
-              decision: 'تأجيل',
-              postponeReason: reason,
-            }
-          : item,
-      ),
+      { companyId: getStoredCompanyId() },
     )
+    try {
+      await update.mutateAsync({ id, values: payload })
+      await refetch()
+    } catch {
+      /* modal already closed; list refresh on next visit */
+    }
   }
 
-  const handleDelete = (id) => {
-    setSessions((prev) => prev.filter((item) => item.id !== id))
-    if (detailsId === id) setDetailsId(null)
-    if (editingId === id) setEditingId(null)
-    if (postponeId === id) setPostponeId(null)
+  const handleDelete = async (id) => {
+    try {
+      await remove.mutateAsync(id)
+      if (String(detailsId) === String(id)) setDetailsId(null)
+      if (String(editingId) === String(id)) setEditingId(null)
+      if (String(postponeId) === String(id)) setPostponeId(null)
+      await refetch()
+    } catch {
+      /* keep UI unchanged on failure */
+    }
   }
 
   const clearFilters = () => {
@@ -296,6 +327,8 @@ export default function SessionsPage() {
     setDateTo('')
     setQuickFilter('all')
   }
+
+  const submitting = create.isPending || update.isPending
 
   return (
     <div className="sessions-page">
@@ -350,55 +383,111 @@ export default function SessionsPage() {
           {isAdmin && (
             <label>
               <span>المحامي</span>
-              <select className="input" value={lawyerFilter} onChange={(e) => setLawyerFilter(e.target.value)}>
-                <option value="">كل المحامين</option>
-                {sessionLawyerOptions.map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-              </select>
+              <FilterSelect
+                value={lawyerFilter}
+                onChange={setLawyerFilter}
+                aria-label="تصفية حسب المحامي"
+                options={[
+                  { value: '', label: 'كل المحامين' },
+                  ...lawyerOptions.map((item) => ({ value: item.id, label: item.name })),
+                ]}
+              />
             </label>
           )}
           <label>
             <span>القضية</span>
-            <select className="input" value={caseFilter} onChange={(e) => setCaseFilter(e.target.value)}>
-              <option value="">كل القضايا</option>
-              {caseOptionsForFilter.map((item) => (
-                <option key={item.id} value={item.id}>{item.title}</option>
-              ))}
-            </select>
+            <FilterSelect
+              value={caseFilter}
+              onChange={setCaseFilter}
+              aria-label="تصفية حسب القضية"
+              options={[
+                { value: '', label: 'كل القضايا' },
+                ...caseOptionsForFilter.map((item) => ({ value: item.id, label: item.title })),
+              ]}
+            />
           </label>
           <label>
             <span>من تاريخ</span>
-            <input type="date" className="input" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            <DateField
+              value={dateFrom}
+              onChange={setDateFrom}
+              aria-label="من تاريخ"
+              placeholder="من تاريخ"
+            />
           </label>
           <label>
             <span>إلى تاريخ</span>
-            <input type="date" className="input" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+            <DateField
+              value={dateTo}
+              onChange={setDateTo}
+              aria-label="إلى تاريخ"
+              placeholder="إلى تاريخ"
+            />
           </label>
           <label>
             <span>النوع</span>
-            <select className="input" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
-              <option value="">كل الأنواع</option>
-              {sessionTypeOptions.map((opt) => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
-            </select>
+            <FilterSelect
+              value={typeFilter}
+              onChange={setTypeFilter}
+              aria-label="تصفية حسب النوع"
+              options={[
+                { value: '', label: 'كل الأنواع' },
+                ...sessionTypeOptions.map((opt) => ({ value: opt.label, label: opt.label })),
+              ]}
+            />
           </label>
           <label>
             <span>الحالة</span>
-            <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="">كل الحالات</option>
-              {sessionStatusOptions.map((opt) => (
-                <option key={opt} value={opt}>{opt}</option>
-              ))}
-            </select>
+            <FilterSelect
+              value={statusFilter}
+              onChange={setStatusFilter}
+              aria-label="تصفية حسب الحالة"
+              options={[
+                { value: '', label: 'كل الحالات' },
+                ...sessionStatusOptions.map((opt) => ({ value: opt, label: opt })),
+              ]}
+            />
           </label>
         </div>
+        {dateRangeInvalid ? (
+          <p className="field__error" role="alert">
+            {MSG.dateOrder}
+          </p>
+        ) : null}
         <button type="button" className="btn btn--ghost" onClick={clearFilters}>
           مسح الفلاتر
         </button>
       </section>
 
+      {isLoading ? (
+        <div className="table-card flex flex-col items-center justify-center gap-3 py-16 text-[#6b7f80]">
+          <HiOutlineRefresh size={28} className="animate-spin text-gold" aria-hidden />
+          <p className="text-sm font-medium">جاري تحميل الجلسات...</p>
+        </div>
+      ) : null}
+
+      {!isLoading && error ? (
+        <div className="table-card flex flex-col items-center gap-4 px-6 py-12 text-center">
+          <span className="grid size-14 place-items-center rounded-2xl bg-rose-50 text-rose-600">
+            <HiOutlineExclamationCircle size={28} aria-hidden />
+          </span>
+          <div>
+            <p className="font-display text-base font-bold text-brand">تعذر تحميل البيانات</p>
+            <p className="mt-1 text-sm text-[#6b7f80]">{error}</p>
+          </div>
+          <button
+            type="button"
+            className="btn btn--primary inline-flex items-center gap-2"
+            onClick={() => refetch()}
+            disabled={isFetching}
+          >
+            <HiOutlineRefresh size={18} className={isFetching ? 'animate-spin' : undefined} aria-hidden />
+            إعادة المحاولة
+          </button>
+        </div>
+      ) : null}
+
+      {!isLoading && !error ? (
       <div className="table-card">
         <div className="table-wrap">
           <table className="data-table sessions-table">
@@ -435,7 +524,7 @@ export default function SessionsPage() {
                     </td>
                     <td>{item.court}</td>
                     <td>{item.judge || '—'}</td>
-                    <td>{formatSessionDate(item.date)}</td>
+                    <td>{formatDisplayDate(item.date)}</td>
                     <td>{item.time || '—'}</td>
                     <td>
                       <span className="session-type">
@@ -497,6 +586,7 @@ export default function SessionsPage() {
           </table>
         </div>
       </div>
+      ) : null}
 
       <section className="sessions-calendar">
         <header className="sessions-calendar__head">
@@ -572,7 +662,9 @@ export default function SessionsPage() {
         }}
         onSave={handleSave}
         caseOptions={caseOptionsForFilter}
+        lawyerOptions={lawyerOptions}
         hideLawyer={isLawyer || isClient}
+        submitting={submitting}
       />
       <SessionDetailsModal
         open={Boolean(detailsSession)}

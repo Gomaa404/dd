@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from '../dashboard/Sidebar'
 import { Topbar } from '../dashboard/Topbar'
-import { currentUser, navItems } from '../../data/dashboard'
+import { navItems } from '../../data/dashboard'
 import { dashboardTitles } from '../../data/roles'
 import { useAuth } from '../../context/AuthContext'
+import { useNotifications } from '../../hooks/useNotifications'
 
 const titles = {
   ...Object.fromEntries(navItems.map((item) => [item.path, item.label])),
@@ -16,6 +17,7 @@ export function DashboardLayout() {
   const [menuOpen, setMenuOpen] = useState(false)
   const { pathname } = useLocation()
   const { user } = useAuth()
+  const { unreadCount } = useNotifications()
 
   const title =
     pathname === '/'
@@ -35,7 +37,7 @@ export function DashboardLayout() {
         <Topbar
           title={title}
           onMenuClick={() => setMenuOpen(true)}
-          unreadNotifications={currentUser.notifications}
+          unreadNotifications={unreadCount}
         />
         <main className="content page-enter">
           <Outlet />

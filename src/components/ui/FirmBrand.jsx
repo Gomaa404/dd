@@ -1,4 +1,4 @@
-import firmLogoImg from '../../assets/الدوسري .png'
+import firmLogoImg from '../../assets/d.png'
 import { firm } from '../../data/dashboard'
 
 export function FirmBrand({ variant = 'sidebar', showName = true, className = '' }) {
